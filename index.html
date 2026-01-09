@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Grass Align GUI (Minecraft coords) — Three.js</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Monda:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+
+      <div class="brand">
+        <div class="brand__title">Grass Align</div>
+        <div class="brand__subtitle">Minecraft-style coordinates • overlay match</div>
+      </div>
+
+      <details open>
+        <summary>Camera / Overlay</summary>
+        <div class="row">
+          <label>X <input id="camX" type="number" step="0.01" value="0" /></label>
+          <label>Y <input id="camY" type="number" step="0.01" value="0" /></label>
+          <label>Z <input id="camZ" type="number" step="0.01" value="0" /></label>
+          <label>Yaw <input id="yaw" type="number" step="0.1" value="0" /></label>
+          <label>Pitch <input id="pitch" type="number" step="0.1" value="0" /></label>
+          <label>FOV <input id="fov" type="number" step="0.1" value="70" /></label>
+        </div>
+
+        <div class="row">
+          <label class="toggle"><input id="useFeetY" type="checkbox" checked /> Feet Y (Minecraft XYZ)</label>
+          <label class="toggle"><input id="centerTpXZ" type="checkbox" checked /> Center X/Z integers (.5)</label>
+          <label>Workspace W <input id="viewW" type="number" step="1" value="960" /></label>
+          <label>Workspace H <input id="viewH" type="number" step="1" value="540" /></label>
+          <label>Render W <input id="renderW" type="number" step="1" value="960" /></label>
+          <label>Render H <input id="renderH" type="number" step="1" value="540" /></label>
+          <button id="applyViewSize" type="button">Apply workspace</button>
+          <button id="sizeToOverlay" type="button" title="Set workspace size to the loaded overlay image">Size = overlay</button>
+          <label class="file">
+            Overlay image (any size)
+            <input id="overlayFile" type="file" accept="image/png,image/jpeg" />
+          </label>
+          <label>Overlay opacity <input id="overlayOpacity" type="range" min="0" max="1" step="0.01" value="0.65" /></label>
+          <label><input id="showOverlay" type="checkbox" checked /> Show overlay</label>
+          <label><input id="showGrid" type="checkbox" checked /> Show grid</label>
+          <label class="range">
+            Grid radius <span id="gridRadiusLabel">24</span>
+            <input id="gridRadius" type="range" min="2" max="64" step="1" value="24" />
+          </label>
+          <label><input id="showGrass" type="checkbox" checked /> Show grass overlay</label>
+          <span class="hint">Camera mouse-look is disabled. Use the numeric camera inputs above.</span>
+        </div>
+
+        <div class="readout" id="readout"></div>
+      </details>
+
+      <details open>
+        <summary>Grass Align</summary>
+        <div class="row">
+          <div class="kbdhelp">
+            <div><b>Left click</b>: select grass</div>
+            <div><b>Right click</b>: enter placement mode</div>
+            <div><b>Right click again</b>: confirm placement</div>
+            <div><b>WASD / arrow keys</b>: move the selected grass offset X/Z (snaps 0–15)</div>
+            <div><b>R / F</b>: adjust offset Y (0–15)</div>
+            <div><b>Enter</b>: confirm selection (no-op, keeps values)</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>Block X <input id="blockX" type="number" step="1" value="0" /></label>
+          <label>Block Y <input id="blockY" type="number" step="1" value="0" /></label>
+          <label>Block Z <input id="blockZ" type="number" step="1" value="0" /></label>
+          <button id="setActiveBlock" type="button">Set active block</button>
+          <span class="hint">Active block is where right-click places new grass.</span>
+        </div>
+
+        <div class="row">
+          <label>Offset X (0–15) <input id="offX" type="number" min="0" max="15" step="1" value="7" /></label>
+          <label>Offset Y (0–15) <input id="offY" type="number" min="0" max="15" step="1" value="7" /></label>
+          <label>Offset Z (0–15) <input id="offZ" type="number" min="0" max="15" step="1" value="7" /></label>
+          <button id="applyOffsets" type="button">Apply to selected</button>
+          <button id="centerOffsets" type="button">Center (7,7,7)</button>
+        </div>
+
+        <div class="row">
+          <label>X <input id="selBlockX" type="number" step="1" value="0" /></label>
+          <label>Y <input id="selBlockY" type="number" step="1" value="0" /></label>
+          <label>Z <input id="selBlockZ" type="number" step="1" value="0" /></label>
+          <button id="applySelBlock" type="button">Set selected block</button>
+          <span class="hint">Moves the currently selected grass to a new block (keeps its offsets).</span>
+        </div>
+
+        <div class="row">
+          <label>Grass list</label>
+          <select id="grassList" size="8" class="list"></select>
+        </div>
+
+        <div class="row">
+          <button id="exportOffsets" type="button">Export offsets</button>
+          <button id="clearGrass" type="button">Clear</button>
+          <span class="hint">Export format: <code>blockX blockY blockZ  offX offY offZ</code> (one per line)</span>
+        </div>
+
+        <textarea id="exportBox" spellcheck="false" placeholder="Export will appear here…"></textarea>
+
+        <div class="crack">
+          <div class="row">
+            <label>Version
+              <select id="crackVersion">
+                <option value="post1_12" selected>1.13+ style (grass uses y=0)</option>
+                <option value="postb1_5">Beta 1.5–1.12 style (grass uses actual y)</option>
+              </select>
+            </label>
+            <label>Center X <input id="crackCenterX" type="number" step="1" value="0" /></label>
+            <label>Center Z <input id="crackCenterZ" type="number" step="1" value="0" /></label>
+            <label>Radius <input id="crackRadius" type="number" step="1" value="256" /></label>
+          </div>
+          <div class="row">
+            <label>Y min <input id="crackYMin" type="number" step="1" value="62" /></label>
+            <label>Y max <input id="crackYMax" type="number" step="1" value="70" /></label>
+            <button id="crackCoords" type="button">Crack coordinates</button>
+            <span id="crackStatus" class="hint">Uses current grass blocks + offsets (no need to export).</span>
+          </div>
+          <textarea id="crackOut" spellcheck="false" placeholder="Possible coordinates will appear here…"></textarea>
+        </div>
+
+      </details>
+
+    </aside>
+
+    <main class="workspace" aria-label="Workspace">
+      <div class="viewport" aria-label="Viewport (960×540)">
+      <canvas id="view" width="960" height="540"></canvas>
+      <div class="badge">
+        <div><span class="swatch grid"></span> Grid (light gray)</div>
+        <div><span class="swatch chunk"></span> Chunk borders (yellow)</div>
+        <div><span class="swatch sel"></span> Selected grass</div>
+      </div>
+      </div>
+      <div class="workspace__hint">Scroll = zoom • Space + drag = pan • Right click = place mode • WASD/Arrows = move offset • DEL = delete selected</div>
+      <div class="workspace__help">
+        <div><b>Placement:</b> right click to start, move mouse to snap X/Z, use <b>R/F</b> for Y, right click again to confirm.</div>
+        <div><b>Selection:</b> left click a grass to select it (selection is rendered slightly brighter).</div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="repos" aria-label="Repositories">
+    <div class="repos__title">Repositories used/referenced</div>
+    <a href="https://github.com/polymetric/mcah-manualgrass" target="_blank" rel="noreferrer">polymetric/mcah-manualgrass</a>
+    <a href="https://github.com/humhue/grassfinder" target="_blank" rel="noreferrer">humhue/grassfinder</a>
+    <a href="https://github.com/Gaider10/PerspectiveReverser" target="_blank" rel="noreferrer">Gaider10/PerspectiveReverser</a>
+    <a href="https://fonts.google.com/specimen/Monda" target="_blank" rel="noreferrer">Google Fonts: Monda</a>
+  </footer>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
