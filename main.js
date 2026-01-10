@@ -1,7 +1,9 @@
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
 // --- Embedded assets (baked into JS) ---
-const GRASS_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IB2cksfwAAAARnQU1BAACxjwv8YQUAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB+oBCBUdD/bhgw0AAAF2SURBVDjLzVAva8NAFP9dRFmgpaSlEDFGTew+QapiS1RNZfIBoqb6AaKq8gEWWRNVYqdaPTE7sTDK2ChJGTm4I+YmtheSNlTvmbv7vfd+fw74d7XaL1TXfZ15nfhVkuYS3c+Xta7F0e2gRejHjioOJbp6nbbP1a450gAgtBNGwNvzF0iN1EmV8HXmqYdpzC4iAMAm2DEACLZzFdoJ64/1uvf5erpw3yJYRjMFALyQ6I9usIxmiucC7y9HrDNPibJqOQEAjfIVhxKT6RAAcHc/QWgnDABMy0DkpqxpP7QTRmK1A1IlsmU0UxTHjx3FC4lNsGNN9dV+oTQaiNyUEcgLiSYxgJqcFxKr/UJtgh3jhQQLtnMVuSnzY0f1xzqO2Tcm02Hr1Ac9mJYBXkjwXIA+lufiN0KwnSsCqPRBrz7p847ZN5pzj94T0yI3ZTwXEGUF0zIgywr0JtuyrOoopmXUJH7sKI3U5Z8K1fmb56LGTh8cACDKCj8oGPasvjKMHwAAAABJRU5ErkJggg==';
+// Grass textures: user can switch between these with keyboard 1 / 2.
+const GRASS_JAPPA_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IB2cksfwAAAARnQU1BAACxjwv8YQUAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB+oBCRYaEmBcoC8AAAF1SURBVDjLzVG/a8JAFP4upLQnhYoORSEEl2z+IVmzumRxziSOJaN0cs7ikrVr/pAOhSyhtChSKgmtd2oi10FeSDQ495a7992978c74N+t8cJSTedJNGzEr5JUm+h83qw1NbYfb2uEjm+odL1H012j7XO1a440AAjcmBHw+fYDUiN1UiV8Eg3Vs/3KLiIAQDRbMQAYzQcqcGPG23p59/0uL9zXCOxpTwGAyHK0Hm5gT3tKpgWW8S8m0VBJUdScAIBG+dL1Hp3+HQCgb90jcGMGAF2TI/QSVrUfuDEjsdIBqRKZPe0piuP4hhJZjmi2YlX18cJSGj0IvYQRKLIcVWIAJbnIcowXlopmKyayHGw0H6jQS5jjG4q3dWyWO3T6d7Wdt3R0TQ6R5ZBpARqsTItThNF8oAigxVt6udPwNssdqu9enj6YFnoJk2kBKQp0TY7D9giqyfZheyyjdE1ekji+oTRSP2yPtf89r2ValFj2dRqkFAX+AB5A7cGa6YC2AAAAAElFTkSuQmCC';
+const GRASS_PROGRAMMER_ART_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IB2cksfwAAAARnQU1BAACxjwv8YQUAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB+oBCRYZNJl8dhEAAAHuSURBVDjLjZPNTxNRFMV/bzr0C7CmFpuh2ipCcGPiv9G1ykYX6opoIhvShXs1uNOV0Y0aSFy451+RIMVS20ptK8JMv5nrYtqZjoyJb/OSl3vPPfec8yDg3H9zTfjPowU9pnLxwOJ7rxf+Dby+fUOCGIzfg5rzBUNcBvWiRb5guEV3X10VgEapDUDze8fHYgysTU6ey8Vc9FalG7jC5pOiAqjtmCQzUbRGqU2+YMjHx0UlI6jOydBtMlsD8gVDjKVp9LDyJocUW2v7SvMJNgKwh9661tGA5HyU2q7F+9U9dcaFRqlNeiFOvmCICO6duBjh9vOsACjN6zv8agHQKDuaaJOoIt5kpcHnpwfq3FyYkK7IXJ9x3Xn4blEuXIp5ORj0bAC21vbVmLYWUtx5kZXjn30+PNpTlS8mh8U2IlDbtbBPZSJIfzm8/bKmWpUumu5f+Xw6gthO8RhAB2hVu8wvz5yxTZ/yB9U+FRhhflr/pnxRru6YPHi7KAArGznHqhGD1c1lcTSCox89Updj/r+Qysa4cjNBaEq5Ao69TmainrBqLDbceuY4pAMc1/uYzQFda4ixNM2vag+AYd+mWfYS+bveR2nQOOgQm9WdISsbOUmkw64ozXKXzskQscFsDlCac4ejISLxEACxWd1N6x8MBNqEjfDNWwAAAABJRU5ErkJggg==';
 const TINTED_CROSS_MODEL = {"ambientocclusion":false,"textures":{"particle":"#cross"},"elements":[{"from":[0.8,0,8],"to":[15.2,16,8],"rotation":{"origin":[8,8,8],"axis":"y","angle":45,"rescale":true},"shade":false,"faces":{"north":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0},"south":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0}}},{"from":[8,0,0.8],"to":[8,16,15.2],"rotation":{"origin":[8,8,8],"axis":"y","angle":45,"rescale":true},"shade":false,"faces":{"west":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0},"east":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0}}}]};
 
 // --- Viewport vs workspace ---
@@ -254,6 +256,7 @@ const el = {
   yaw: document.getElementById('yaw'),
   pitch: document.getElementById('pitch'),
   fov: document.getElementById('fov'),
+  oldCamNudge: document.getElementById('oldCamNudge'),
   readout: document.getElementById('readout'),
 
   viewW: document.getElementById('viewW'),
@@ -271,11 +274,6 @@ const el = {
   gridRadiusLabel: document.getElementById('gridRadiusLabel'),
   showGrass: document.getElementById('showGrass'),
 
-  blockX: document.getElementById('blockX'),
-  blockY: document.getElementById('blockY'),
-  blockZ: document.getElementById('blockZ'),
-  setActiveBlock: document.getElementById('setActiveBlock'),
-
   offX: document.getElementById('offX'),
   offY: document.getElementById('offY'),
   offZ: document.getElementById('offZ'),
@@ -290,6 +288,8 @@ const el = {
   grassList: document.getElementById('grassList'),
   exportOffsets: document.getElementById('exportOffsets'),
   exportBox: document.getElementById('exportBox'),
+  grassDataIn: document.getElementById('grassDataIn'),
+  loadGrassData: document.getElementById('loadGrassData'),
   crackCoords: document.getElementById('crackCoords'),
   crackOut: document.getElementById('crackOut'),
   crackCenterX: document.getElementById('crackCenterX'),
@@ -298,13 +298,33 @@ const el = {
   crackYMin: document.getElementById('crackYMin'),
   crackYMax: document.getElementById('crackYMax'),
   crackVersion: document.getElementById('crackVersion'),
+  matchMode: document.getElementById('matchMode'),
+  tolerance: document.getElementById('tolerance'),
+  tolVal: document.getElementById('tolVal'),
+  warn: document.getElementById('warn'),
   crackStatus: document.getElementById('crackStatus'),
+  crackWorkers: document.getElementById('crackWorkers'),
   clearGrass: document.getElementById('clearGrass'),
 };
 
 function num(v, fallback=0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+// --- Cracker match mode UI wiring ---
+const matchModeEl = el.matchMode;
+const toleranceEl = el.tolerance;
+const tolValEl = el.tolVal;
+const warnEl = el.warn;
+
+if (toleranceEl && tolValEl) {
+  tolValEl.textContent = String(toleranceEl.value);
+  toleranceEl.oninput = () => { tolValEl.textContent = String(toleranceEl.value); };
+}
+if (matchModeEl && warnEl) {
+  warnEl.classList.toggle('hidden', matchModeEl.value === 'strict');
+  matchModeEl.onchange = () => warnEl.classList.toggle('hidden', matchModeEl.value === 'strict');
 }
 
 function applyViewportSize(w, h) {
@@ -494,10 +514,15 @@ applyWorkspaceAndRenderSize(VIEW_W, VIEW_H, RENDER_W, RENDER_H);
 syncOverlayUI();
 
 // --- Pan/zoom inside the fixed 960×540 viewport canvas ---
-let mouseDown = false;
-let mouseDownPixelX = 0;
-let mouseDownPixelY = 0;
-let spaceDown = false;
+let leftDown = false;
+let leftDownClientX = 0;
+let leftDownClientY = 0;
+let leftDownWorldX = 0;
+let leftDownWorldY = 0;
+let didPanDrag = false;
+
+// Treat a tiny mouse wobble as a click, not a pan.
+const PAN_DRAG_THRESHOLD_PX = 3;
 
 function offsetToWorkspaceX(offsetX) {
   return (offsetX - viewCanvas.clientWidth / 2) / zoom + centerX;
@@ -512,34 +537,43 @@ function setOffsetWorkspacePos(offsetX, offsetY, worldX, worldY) {
   roundedCenterY = Math.round(centerY * zoom) / zoom;
 }
 
-window.addEventListener('keydown', (e) => { if (e.code === 'Space') spaceDown = true; });
-window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
-
 viewCanvas.addEventListener('mousedown', (event) => {
-  // Space+drag pans the workspace. (Regular click remains available for selection.)
-  if (!spaceDown) return;
-  mouseDown = true;
-  mouseDownPixelX = offsetToWorkspaceX(event.offsetX);
-  mouseDownPixelY = offsetToWorkspaceY(event.offsetY);
+  // Left-click drag pans the workspace.
+  if (event.button !== 0) return;
+  leftDown = true;
+  didPanDrag = false;
+  leftDownClientX = event.clientX;
+  leftDownClientY = event.clientY;
+  leftDownWorldX = offsetToWorkspaceX(event.offsetX);
+  leftDownWorldY = offsetToWorkspaceY(event.offsetY);
   event.preventDefault();
 });
-window.addEventListener('mouseup', () => { mouseDown = false; });
 viewCanvas.addEventListener('mousemove', (event) => {
-  if (!mouseDown) return;
-  setOffsetWorkspacePos(event.offsetX, event.offsetY, mouseDownPixelX, mouseDownPixelY);
+  if (!leftDown) return;
+  if (!didPanDrag) {
+    const dx = Math.abs(event.clientX - leftDownClientX);
+    const dy = Math.abs(event.clientY - leftDownClientY);
+    if (dx + dy >= PAN_DRAG_THRESHOLD_PX) didPanDrag = true;
+  }
+  if (!didPanDrag) return;
+  setOffsetWorkspacePos(event.offsetX, event.offsetY, leftDownWorldX, leftDownWorldY);
   event.preventDefault();
 });
+
+// If the mouse is released outside the canvas, stop any in-progress pan.
+window.addEventListener('mouseup', () => { leftDown = false; didPanDrag = false; });
 
 viewCanvas.addEventListener('wheel', (event) => {
   event.preventDefault();
   // Zoom around cursor (like local-overlay). One wheel tick ~ +/-1 zoom index.
-  if (!mouseDown) {
-    mouseDownPixelX = offsetToWorkspaceX(event.offsetX);
-    mouseDownPixelY = offsetToWorkspaceY(event.offsetY);
+  // If we're not actively panning, refresh the zoom anchor to the current cursor.
+  if (!leftDown || !didPanDrag) {
+    leftDownWorldX = offsetToWorkspaceX(event.offsetX);
+    leftDownWorldY = offsetToWorkspaceY(event.offsetY);
   }
   zoomIndex = clamp(zoomIndex + Math.round(-event.deltaY / 100), -6, 6);
   zoom = Math.pow(2, zoomIndex);
-  setOffsetWorkspacePos(event.offsetX, event.offsetY, mouseDownPixelX, mouseDownPixelY);
+  setOffsetWorkspacePos(event.offsetX, event.offsetY, leftDownWorldX, leftDownWorldY);
 }, { passive: false });
 
 function updateCameraFromUI(){
@@ -558,9 +592,15 @@ function updateCameraFromUI(){
   camera.fov = fov;
   camera.updateProjectionMatrix();
 
-  camera.position.set(x, yEye, z);
   const forward = mcForwardFromYawPitch(yaw, pitch);
-  camera.lookAt(new THREE.Vector3().copy(camera.position).add(forward));
+  const useOldNudge = Boolean(el.oldCamNudge?.checked);
+  const nudge = useOldNudge ? 0.05 : 0.0;
+
+  // Old Minecraft (e.g. 1.11) first-person rendering nudges the view forward by +0.05 in view direction.
+  // Emulate that here when requested so overlays match older screenshots.
+  const camPos = new THREE.Vector3(x, yEye, z).addScaledVector(forward, nudge);
+  camera.position.copy(camPos);
+  camera.lookAt(new THREE.Vector3().copy(camPos).add(forward));
 
   if (feetMode) {
     const yFeet = yInput;
@@ -570,14 +610,16 @@ pos   = (${x.toFixed(3)}, ${yEye.toFixed(3)}, ${z.toFixed(3)})   [eye]
 feet  = (${x.toFixed(3)}, ${yFeet.toFixed(3)}, ${z.toFixed(3)})
 yaw   = ${yaw.toFixed(3)}°   (0=+Z/south, -90=+X/east)
 pitch = ${pitch.toFixed(3)}° (+=down, -=up)
-fov   = ${fov.toFixed(3)}°   (vertical)`;
+fov   = ${fov.toFixed(3)}°   (vertical)
+old nudge = ${useOldNudge ? '+0.05' : 'off'}`;
   } else {
     el.readout.textContent =
 `Minecraft-style camera
 pos   = (${x.toFixed(3)}, ${yEye.toFixed(3)}, ${z.toFixed(3)})   [blocks]
 yaw   = ${yaw.toFixed(3)}°   (0=+Z/south, -90=+X/east)
 pitch = ${pitch.toFixed(3)}° (+=down, -=up)
-fov   = ${fov.toFixed(3)}°   (vertical)`;
+fov   = ${fov.toFixed(3)}°   (vertical)
+old nudge = ${useOldNudge ? '+0.05' : 'off'}`;
   }
 
   // Keep helper visuals centered around the player (3x3 chunks) and prevent the grid/borders from stopping at +/-32.
@@ -596,6 +638,8 @@ function syncCamYDisplayToMode() {
 for (const k of ['camX','camY','camZ','yaw','pitch','fov']) {
   el[k].addEventListener('input', updateCameraFromUI);
 }
+
+el.oldCamNudge?.addEventListener('change', updateCameraFromUI);
 
 el.useFeetY?.addEventListener('change', () => {
   // Preserve the *current* perceived value when flipping modes.
@@ -634,13 +678,46 @@ el.showGrass.addEventListener('change', syncGrassUI);
 syncGrassUI();
 
 // Shared materials/geometry
-const texture = await new THREE.TextureLoader().loadAsync(GRASS_PNG_DATA_URL);
-texture.colorSpace = THREE.SRGBColorSpace;
-texture.magFilter = THREE.NearestFilter;
-texture.minFilter = THREE.NearestFilter;
+// Two textures (same model + same 0–15 offsets). Switch with keyboard:
+//   1 = Jappa (modern)
+//   2 = Programmer Art
+const texIndicatorEl = document.getElementById('texIndicator');
+
+const texLoader = new THREE.TextureLoader();
+const textureJappa = await texLoader.loadAsync(GRASS_JAPPA_PNG_DATA_URL);
+const textureProg  = await texLoader.loadAsync(GRASS_PROGRAMMER_ART_PNG_DATA_URL);
+
+for (const t of [textureJappa, textureProg]) {
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+}
+
+let activeGrassTexKey = 'jappa';
+function syncGrassTextureIndicator(){
+  if (!texIndicatorEl) return;
+  texIndicatorEl.textContent = (activeGrassTexKey === 'jappa')
+    ? 'Grass texture: Jappa'
+    : 'Grass texture: Programmer Art';
+}
+
+function setGrassTexture(key) {
+  const next = (key === 'prog' || key === 'programmer') ? 'prog' : 'jappa';
+  activeGrassTexKey = next;
+
+  const map = (activeGrassTexKey === 'jappa') ? textureJappa : textureProg;
+  baseMat.map = map;
+  selectedMat.map = map;
+  placementMat.map = map;
+  baseMat.needsUpdate = true;
+  selectedMat.needsUpdate = true;
+  placementMat.needsUpdate = true;
+
+  syncGrassTextureIndicator();
+}
 
 const baseMat = new THREE.MeshBasicMaterial({
-  map: texture,
+  map: textureJappa,
   transparent: true,
   alphaTest: 0.5,
   // IMPORTANT (Minecraft parity): plants are not mirrored when viewed from the back.
@@ -653,7 +730,8 @@ const baseMat = new THREE.MeshBasicMaterial({
 const selectedMat = baseMat.clone();
 // Make selection "slightly brighter" (less tinted) rather than a strong color.
 baseMat.color.setHex(0xdddddd);
-selectedMat.color.setHex(0xffffff);
+// Slight red tint for selected grass highlight
+selectedMat.color.setHex(0xfff0f0);
 
 // Placement preview material (light gray)
 const placementMat = baseMat.clone();
@@ -661,6 +739,12 @@ placementMat.color.setHex(0xd6d6d6);
 placementMat.opacity = 0.65;
 placementMat.transparent = true;
 placementMat.depthWrite = false;
+
+// Initial label
+syncGrassTextureIndicator();
+
+// Initialize indicator to match the default texture.
+syncGrassTextureIndicator();
 
 // We build the grass directly from the Minecraft model JSON (tinted_cross.json)
 // so that rotations (including `rescale: true`) match the in-game geometry.
@@ -841,9 +925,6 @@ function setSelected(id){
   if (id == null) return;
   const g = grasses.get(id);
   if (!g) return;
-  el.blockX.value = String(g.block.x);
-  el.blockY.value = String(g.block.y);
-  el.blockZ.value = String(g.block.z);
 
   // Selected grass block position (separate from "active block")
   el.selBlockX.value = String(g.block.x);
@@ -903,19 +984,6 @@ function clearAllGrass(){
   selectedId = null;
   refreshGrassList();
 }
-
-// --- Active block UI ---
-function setActiveBlockFromInputs(){
-  activeBlock = new THREE.Vector3(
-    Math.trunc(num(el.blockX.value, 0)),
-    Math.trunc(num(el.blockY.value, 0)),
-    Math.trunc(num(el.blockZ.value, 0))
-  );
-}
-
-el.setActiveBlock.addEventListener('click', () => {
-  setActiveBlockFromInputs();
-});
 
 // --- Offset UI apply ---
 function applyOffsetsFromUI({syncUI=true} = {}){
@@ -990,6 +1058,50 @@ el.exportOffsets.addEventListener('click', () => {
 });
 
 
+
+
+function parseGrassDataStrict(text){
+  const lines = String(text || '').split(/\r?\n/);
+  const rows = [];
+  for (let i=0;i<lines.length;i++){
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    // strict: exactly 6 integers separated by whitespace
+    const m = raw.match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$/);
+    if (!m) throw new Error(`Invalid format on line ${i+1}. Expected: blockX blockY blockZ offX offY offZ`);
+    const bx = parseInt(m[1],10), by = parseInt(m[2],10), bz = parseInt(m[3],10);
+    const ox = parseInt(m[4],10), oy = parseInt(m[5],10), oz = parseInt(m[6],10);
+    if (![ox,oy,oz].every(v => Number.isInteger(v) && v>=0 && v<=15)){
+      throw new Error(`Offsets must be 0–15 on line ${i+1}. Got: ${ox} ${oy} ${oz}`);
+    }
+    rows.push({bx,by,bz,ox,oy,oz});
+  }
+  if (!rows.length) throw new Error('No grass data found.');
+  return rows;
+}
+
+el.loadGrassData.addEventListener('click', () => {
+  try{
+    const rows = parseGrassDataStrict(el.grassDataIn.value);
+    el.exportBox.value = '';
+    clearAllGrass();
+    for (const r of rows){
+      addGrass(new THREE.Vector3(r.bx, r.by, r.bz), {x:r.ox, y:r.oy, z:r.oz});
+    }
+    // select first grass and set active block
+    const first = [...grasses.values()].sort((a,b)=>a.id-b.id)[0];
+    if (first){
+      activeBlock.copy(first.block);
+      setSelected(first.id);
+    }
+    el.crackStatus.textContent = `Loaded ${rows.length} grass entries.`;
+  }catch(err){
+    console.error(err);
+    el.crackStatus.textContent = String(err?.message || err);
+    alert(String(err?.message || err));
+  }
+});
+
 el.crackCoords.addEventListener('click', async () => {
   const centerX = num(el.crackCenterX.value, 0);
   const centerZ = num(el.crackCenterZ.value, 0);
@@ -997,6 +1109,8 @@ el.crackCoords.addEventListener('click', async () => {
   const yMin = Math.round(num(el.crackYMin.value, 62));
   const yMax = Math.round(num(el.crackYMax.value, 70));
   const version = el.crackVersion.value === 'postb1_5' ? 'postb1_5' : 'post1_12';
+  const matchMode = (el.matchMode?.value === 'scored') ? 'scored' : 'strict';
+  const tolerance = clamp(Math.round(num(el.tolerance?.value, 1)), 0, 2);
 
   el.crackOut.value = '';
   el.crackCoords.disabled = true;
@@ -1006,6 +1120,11 @@ el.crackCoords.addEventListener('click', async () => {
   try{
     const res = await GF.crack({
       centerX, centerZ, radius, yMin, yMax, version,
+      matchMode,
+      tolerance,
+      maxScore: 6,
+      maxResults: 50,
+      useWorkers: !!el.crackWorkers?.checked,
       onProgress: ({done, total, matches}) => {
         const pct = total ? (done/total*100) : 0;
         el.crackStatus.textContent = `Cracking… ${pct.toFixed(1)}%  checked ${done.toLocaleString()} / ${total.toLocaleString()}  matches ${matches}`;
@@ -1013,12 +1132,15 @@ el.crackCoords.addEventListener('click', async () => {
     });
 
     const dt = performance.now() - t0;
+    const lines = res.matches.map(p => {
+      if (matchMode === 'scored') return `${p.x} ${p.y} ${p.z}  score=${p.score}`;
+      return `${p.x} ${p.y} ${p.z}`;
+    });
+
     if (res.warning) {
-      el.crackOut.value = `⚠ ${res.warning}\n\n` + (res.matches.map(p => `${p.x} ${p.y} ${p.z}`).join('\n') || '(no matches)');
+      el.crackOut.value = `⚠ ${res.warning}\n\n` + (lines.join('\n') || '(no matches)');
     } else {
-      el.crackOut.value = res.matches.length
-        ? res.matches.map(p => `${p.x} ${p.y} ${p.z}`).join('\n')
-        : '(no matches in the searched range)';
+      el.crackOut.value = lines.length ? lines.join('\n') : '(no matches in the searched range)';
     }
     el.crackStatus.textContent = `Done in ${(dt/1000).toFixed(2)}s — matches: ${res.matches.length}`;
     el.crackOut.focus();
@@ -1090,46 +1212,202 @@ const GF = (() => {
   const LCG_MULT = 0x285b825n;
   const LCG_ADDEND = 11n;
 
+  // Helpers for exact Java/Rust-style wrapping semantics.
+  const i32 = (v) => BigInt.asIntN(32, BigInt(v));
+  const i64 = (v) => BigInt.asIntN(64, v);
+
   function getCoordRandom(x, y, z){
-    // Use BigInt to keep 64-bit behavior consistent with Rust/Java long math.
-    let seed = (BigInt(x * X_MULT) ^ BigInt(z * Z_MULT) ^ BigInt(y));
-    seed = seed * seed * LCG_MULT + seed * LCG_ADDEND;
+    // - x/z multiplied as signed 32-bit ints (wrapping), then sign-extended
+    // - subsequent math wraps as signed 64-bit
+    const sx = i64(BigInt.asIntN(32, i32(x) * i32(X_MULT)));
+    const sz = i64(BigInt.asIntN(32, i32(z) * i32(Z_MULT)));
+    const sy = i64(i32(y));
+
+    let seed = i64(sx ^ sz ^ sy);
+    seed = i64(seed * seed * LCG_MULT + seed * LCG_ADDEND);
     return seed;
   }
 
-  function grassOffset(x, y, z, version){
+  function packedGrassOffset(x, y, z, version){
     const yy = (version === 'post1_12') ? 0 : y;
     const seed = getCoordRandom(x, yy, z);
-    return {
-      x: Number((seed >> 16n) & 15n),
-      y: Number((seed >> 20n) & 15n),
-      z: Number((seed >> 24n) & 15n),
-    };
+    const ox = Number((seed >> 16n) & 15n);
+    const oy = Number((seed >> 20n) & 15n);
+    const oz = Number((seed >> 24n) & 15n);
+    return (ox | (oy << 4) | (oz << 8)) >>> 0; // 12-bit packed
   }
 
-  function equalOff(a,b){ return a.x===b.x && a.y===b.y && a.z===b.z; }
+  function scorePacked(predPacked, expectedPacked, tol){
+    // tol in {0,1,2}
+    let score = 0;
+    for (let axis = 0; axis < 3; axis++) {
+      const p = (predPacked >> (axis * 4)) & 15;
+      const e = (expectedPacked >> (axis * 4)) & 15;
+      const d = Math.abs(p - e);
+      if (d <= tol) score += d;
+      else score += d * d;
+    }
+    return score;
+  }
 
   function rowsFromGrasses(){
     const ordered = [...grasses.values()].sort((a,b)=>a.id-b.id);
     return ordered.map(g => ({
       pos: { x: g.block.x|0, y: g.block.y|0, z: g.block.z|0 },
-      off: { x: g.off.x|0, y: g.off.y|0, z: g.off.z|0 },
+      packed: ((g.off.x|0) | ((g.off.y|0) << 4) | ((g.off.z|0) << 8)) >>> 0,
     }));
   }
 
-  function crack({centerX, centerZ, radius, yMin, yMax, version, onProgress}){
+  // --- Worker implementation (optional) ---
+  let workerURL = null;
+
+  function getWorkerURL(){
+    if (workerURL) return workerURL;
+
+    const src = `
+      const X_MULT = ${X_MULT};
+      const Z_MULT = ${Z_MULT};
+      const LCG_MULT = ${LCG_MULT}n;
+      const LCG_ADDEND = ${LCG_ADDEND}n;
+
+      const i32 = (v) => BigInt.asIntN(32, BigInt(v));
+      const i64 = (v) => BigInt.asIntN(64, v);
+
+      function getCoordRandom(x, y, z){
+        const sx = i64(BigInt.asIntN(32, i32(x) * i32(X_MULT)));
+        const sz = i64(BigInt.asIntN(32, i32(z) * i32(Z_MULT)));
+        const sy = i64(i32(y));
+        let seed = i64(sx ^ sz ^ sy);
+        seed = i64(seed * seed * LCG_MULT + seed * LCG_ADDEND);
+        return seed;
+      }
+
+      function packedGrassOffset(x, y, z, version){
+        const yy = (version === 'post1_12') ? 0 : y;
+        const seed = getCoordRandom(x, yy, z);
+        const ox = Number((seed >> 16n) & 15n);
+        const oy = Number((seed >> 20n) & 15n);
+        const oz = Number((seed >> 24n) & 15n);
+        return (ox | (oy << 4) | (oz << 8)) >>> 0;
+      }
+
+      function scorePacked(predPacked, expectedPacked, tol){
+        let score = 0;
+        for (let axis = 0; axis < 3; axis++) {
+          const p = (predPacked >> (axis * 4)) & 15;
+          const e = (expectedPacked >> (axis * 4)) & 15;
+          const d = Math.abs(p - e);
+          if (d <= tol) score += d;
+          else score += d * d;
+        }
+        return score;
+      }
+
+      onmessage = (e) => {
+        const { jobId, x0, x1, z0, z1, y0, y1, version, rel, maxMatches, post1_12_anyY, mode, tol, maxScore } = e.data;
+        const matches = [];
+        let done = 0;
+        const xCount = (x1 - x0 + 1);
+        const zCount = (z1 - z0 + 1);
+        const yCount = post1_12_anyY ? 1 : (y1 - y0 + 1);
+        const total = xCount * zCount * yCount;
+
+        const emitEvery = 250000;
+
+        function checkAt(x, y, z){
+          let score = 0;
+          for (let i=0;i<rel.length;i++){
+            const r = rel[i];
+            const ax = x + r.dx;
+            const ay = y + r.dy;
+            const az = z + r.dz;
+            const p = packedGrassOffset(ax, ay, az, version);
+
+            if (mode === 'strict') {
+              if (p !== r.packed) return -1;
+            } else {
+              score += scorePacked(p, r.packed, tol|0);
+              if (score > (maxScore|0)) return -1;
+            }
+          }
+          return score|0;
+        }
+
+        if (post1_12_anyY){
+          // y does not affect offsets; scan X/Z only (huge speedup)
+          const y = y0; // representative
+          for (let z=z0; z<=z1; z++){
+            for (let x=x0; x<=x1; x++){
+              const s = checkAt(x, y, z);
+              if (s >= 0){
+                if (mode === 'scored') matches.push({x, y, z, score:s});
+                else matches.push({x, y, z});
+                if (matches.length >= maxMatches){
+                  postMessage({ jobId, type:'done', done: total, total, matches, hitCap:true });
+                  return;
+                }
+              }
+              done++;
+              if ((done % emitEvery) === 0) postMessage({ jobId, type:'progress', done, total, matchesCount: matches.length });
+            }
+          }
+        } else {
+          for (let y=y0; y<=y1; y++){
+            for (let z=z0; z<=z1; z++){
+              for (let x=x0; x<=x1; x++){
+                const s = checkAt(x, y, z);
+                if (s >= 0){
+                  if (mode === 'scored') matches.push({x, y, z, score:s});
+                  else matches.push({x, y, z});
+                  if (matches.length >= maxMatches){
+                    postMessage({ jobId, type:'done', done: total, total, matches, hitCap:true });
+                    return;
+                  }
+                }
+                done++;
+                if ((done % emitEvery) === 0) postMessage({ jobId, type:'progress', done, total, matchesCount: matches.length });
+              }
+            }
+          }
+        }
+
+        postMessage({ jobId, type:'done', done, total, matches, hitCap:false });
+      };
+    `;
+
+    workerURL = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    return workerURL;
+  }
+
+  async function crack({
+    centerX, centerZ, radius, yMin, yMax, version,
+    matchMode='strict',
+    tolerance=1,
+    maxScore=6,
+    maxResults=50,
+    useWorkers=true,
+    onProgress
+  }){
     const rows = rowsFromGrasses();
     if (rows.length < 2) {
       return { matches: [], warning: 'Add at least 2 grass blocks to crack coordinates.' };
     }
 
+    const mode = (matchMode === 'scored') ? 'scored' : 'strict';
+    const tol = clamp(Math.round(Number(tolerance)), 0, 2);
+    const MAX_SCORE = Math.max(0, (maxScore|0) || 0);
+    const MAX_RESULTS = Math.max(1, (maxResults|0) || 1);
+
     const recorigin = rows[0].pos;
-    const rel = rows.map(r => ({
-      dx: r.pos.x - recorigin.x,
-      dy: r.pos.y - recorigin.y,
-      dz: r.pos.z - recorigin.z,
-      off: r.off,
+    let rel = rows.map(r => ({
+      dx: (r.pos.x - recorigin.x) | 0,
+      dy: (r.pos.y - recorigin.y) | 0,
+      dz: (r.pos.z - recorigin.z) | 0,
+      packed: r.packed >>> 0,
     }));
+
+    // Check farthest samples first for early mismatch exit.
+    rel = rel.sort((a,b) => (Math.abs(b.dx)+Math.abs(b.dz)+Math.abs(b.dy)) - (Math.abs(a.dx)+Math.abs(a.dz)+Math.abs(a.dy)));
 
     const x0 = Math.floor(centerX - radius);
     const x1 = Math.floor(centerX + radius);
@@ -1138,40 +1416,197 @@ const GF = (() => {
     const yy0 = Math.floor(Math.min(yMin, yMax));
     const yy1 = Math.floor(Math.max(yMin, yMax));
 
-    const total = (x1-x0+1) * (z1-z0+1) * (yy1-yy0+1);
-    let done = 0;
-    const matches = [];
+    const post1_12_anyY = (version === 'post1_12');
+    const total = (x1-x0+1) * (z1-z0+1) * (post1_12_anyY ? 1 : (yy1-yy0+1));
 
+    const MAX_MATCHES = 2000;
+
+    // --- Fast path: Web Workers ---
+    const wantWorkers = !!useWorkers && !!window.Worker;
+    const hw = Math.max(1, Math.min(16, (navigator.hardwareConcurrency|0) || 1));
+    const xCount = (x1 - x0 + 1);
+    const nWorkers = wantWorkers ? Math.max(1, Math.min(hw, xCount)) : 1;
+
+    if (wantWorkers && nWorkers > 1) {
+      const url = getWorkerURL();
+      const workers = [];
+      const jobIdBase = (Math.random()*1e9)|0;
+
+      const stripes = [];
+      const base = Math.floor(xCount / nWorkers);
+      let rem = xCount % nWorkers;
+      let cur = x0;
+      for (let i=0;i<nWorkers;i++){
+        const w = base + (rem>0 ? 1 : 0);
+        if (rem>0) rem--;
+        const xs = cur;
+        const xe = cur + w - 1;
+        cur = xe + 1;
+        stripes.push({ xs, xe });
+      }
+
+      const progress = new Array(nWorkers).fill(0);
+      const totals = new Array(nWorkers).fill(0);
+      const matchesAll = [];
+      let hitCap = false;
+
+      function emitProgress(){
+        if (!onProgress) return;
+        const done = progress.reduce((a,b)=>a+b,0);
+        const tot = totals.reduce((a,b)=>a+b,0) || total;
+        onProgress({ done, total: tot, matches: matchesAll.length });
+      }
+
+      const promises = stripes.map((s, idx) => new Promise((resolve, reject) => {
+        const w = new Worker(url, { type: 'classic' });
+        workers.push(w);
+
+        w.onmessage = (ev) => {
+          const msg = ev.data;
+          if (!msg || msg.jobId !== (jobIdBase + idx)) return;
+          if (msg.type === 'progress'){
+            progress[idx] = msg.done|0;
+            totals[idx] = msg.total|0;
+            emitProgress();
+            return;
+          }
+          if (msg.type === 'done'){
+            progress[idx] = msg.done|0;
+            totals[idx] = msg.total|0;
+
+            if (!hitCap) {
+              for (const m of msg.matches){
+                matchesAll.push(m);
+                if (matchesAll.length >= MAX_MATCHES) { hitCap = true; break; }
+              }
+            }
+
+            if (msg.hitCap) hitCap = true;
+
+            emitProgress();
+            resolve();
+            return;
+          }
+        };
+
+        w.onerror = (e) => reject(e);
+
+        w.postMessage({
+          jobId: jobIdBase + idx,
+          x0: s.xs, x1: s.xe,
+          z0, z1,
+          y0: yy0, y1: yy1,
+          version,
+          rel,
+          maxMatches: MAX_MATCHES,
+          post1_12_anyY,
+          mode,
+          tol,
+          maxScore: MAX_SCORE
+        });
+      }));
+
+      try {
+        await Promise.all(promises);
+      } finally {
+        for (const w of workers) w.terminate();
+      }
+
+      const warning =
+        hitCap ? `Hit the cap of ${MAX_MATCHES} matches. Reduce radius / tighten inputs.` :
+        (post1_12_anyY && yy1 !== yy0) ? `In 1.13+ mode, grass offsets do not depend on Y. Reported Y is a placeholder; any Y in [${yy0}, ${yy1}] is possible.` :
+        null;
+
+      if (mode === 'scored') {
+        matchesAll.sort((a,b)=> (a.score-b.score) || (a.x-b.x) || (a.z-b.z) || (a.y-b.y));
+        return { matches: matchesAll.slice(0, MAX_RESULTS), warning };
+      }
+
+      // Keep deterministic order (x then z then y).
+      matchesAll.sort((a,b)=> (a.x-b.x) || (a.z-b.z) || (a.y-b.y));
+      return { matches: matchesAll, warning };
+    }
+
+    // --- Fallback: single-threaded chunked scan (still optimized) ---
     function checkAt(x,y,z){
+      let score = 0;
       for (let i=0;i<rel.length;i++){
         const r = rel[i];
         const ax = x + r.dx;
         const ay = y + r.dy;
         const az = z + r.dz;
-        const o = grassOffset(ax, ay, az, version);
-        if (!equalOff(o, r.off)) return false;
+        const p = packedGrassOffset(ax, ay, az, version);
+        if (mode === 'strict') {
+          if (p !== r.packed) return -1;
+        } else {
+          score += scorePacked(p, r.packed, tol);
+          if (score > MAX_SCORE) return -1;
+        }
       }
-      return true;
+      return score|0;
     }
+
+    let done = 0;
+    const matches = [];
 
     // Chunked scan to keep UI responsive.
     let cy = yy0, cz = z0, cx = x0;
-    const MAX_MATCHES = 2000;
-    const CHUNK = 8000;
+    const CHUNK = 12000;
 
     return new Promise(resolve => {
       function step(){
         let n = 0;
+
+        if (post1_12_anyY){
+          const y = yy0; // representative
+          while (n < CHUNK && cz <= z1){
+            const s = checkAt(cx, y, cz);
+            if (s >= 0) {
+              if (mode === 'scored') matches.push({ x: cx, y, z: cz, score: s });
+              else matches.push({ x: cx, y, z: cz });
+              if (matches.length >= MAX_MATCHES) {
+                resolve({ matches, warning: `Hit the cap of ${MAX_MATCHES} matches. Reduce radius / tighten inputs.` });
+                return;
+              }
+            }
+
+            done++; n++;
+            cx++;
+            if (cx > x1){ cx = x0; cz++; }
+
+            if (onProgress && (done % 50000 === 0)) onProgress({ done, total, matches: matches.length });
+          }
+
+          if (onProgress) onProgress({ done, total, matches: matches.length });
+
+          if (cz > z1) {
+            const warning = (yy1 !== yy0)
+              ? `In 1.13+ mode, grass offsets do not depend on Y. Reported Y is a placeholder; any Y in [${yy0}, ${yy1}] is possible.`
+              : null;
+            if (mode === 'scored') {
+              matches.sort((a,b)=> (a.score-b.score) || (a.x-b.x) || (a.z-b.z) || (a.y-b.y));
+              resolve({ matches: matches.slice(0, MAX_RESULTS), warning });
+            } else {
+              resolve({ matches, warning });
+            }
+            return;
+          }
+
+          requestAnimationFrame(step);
+          return;
+        }
+
         while (n < CHUNK && cy <= yy1){
-          if (checkAt(cx, cy, cz)) {
-            matches.push({ x: cx, y: cy, z: cz });
+          const s = checkAt(cx, cy, cz);
+          if (s >= 0) {
+            if (mode === 'scored') matches.push({ x: cx, y: cy, z: cz, score: s });
+            else matches.push({ x: cx, y: cy, z: cz });
             if (matches.length >= MAX_MATCHES) {
               resolve({ matches, warning: `Hit the cap of ${MAX_MATCHES} matches. Reduce radius / tighten inputs.` });
               return;
             }
           }
 
-          // advance
           done++; n++;
           cx++;
           if (cx > x1){ cx = x0; cz++; }
@@ -1183,7 +1618,12 @@ const GF = (() => {
         if (onProgress) onProgress({ done, total, matches: matches.length });
 
         if (cy > yy1) {
-          resolve({ matches, warning: null });
+          if (mode === 'scored') {
+            matches.sort((a,b)=> (a.score-b.score) || (a.x-b.x) || (a.z-b.z) || (a.y-b.y));
+            resolve({ matches: matches.slice(0, MAX_RESULTS), warning: null });
+          } else {
+            resolve({ matches, warning: null });
+          }
           return;
         }
         requestAnimationFrame(step);
@@ -1247,6 +1687,35 @@ function enterPlacementMode(startY){
   placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
 }
 
+function computeBlockInFrontOfCameraSameY(){
+  // Spawn placement in front of the camera, on the camera's current Y level.
+  // This matches the user's expectation when comparing screenshots: a new foliage
+  // sample should start near what you're looking at, not at some stale "active block" Y.
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  // A small distance in front of the camera so the initial block is "in view".
+  // (Using >1 avoids frequently landing in the same block when very close to a boundary.)
+  const dist = 2.0;
+  const p = camera.position.clone().add(dir.multiplyScalar(dist));
+  return new THREE.Vector3(Math.floor(p.x), Math.floor(camera.position.y), Math.floor(p.z));
+}
+
+function enterPlacementModeAtBlock(startBlock){
+  placementMode = true;
+  placementY = Math.trunc(startBlock.y);
+  placementBlock.set(Math.trunc(startBlock.x), placementY, Math.trunc(startBlock.z));
+
+  if (!placementPreview) {
+    placementPreview = makePlacementPreviewMesh();
+    // Preview should not be pickable as an existing grass instance.
+    placementPreview.userData.__placementPreview = true;
+    scene.add(placementPreview);
+  }
+  placementPreview.visible = true;
+  const off = offsetToVec3(placementOff.x, placementOff.y, placementOff.z);
+  placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
+}
+
 function exitPlacementMode(){
   placementMode = false;
   if (placementPreview) placementPreview.visible = false;
@@ -1261,14 +1730,8 @@ viewCanvas.addEventListener('mousemove', (e) => {
 });
 
 viewCanvas.addEventListener('mousedown', (e) => {
-  // If we're currently panning (Space+drag), don't treat this as a placement/select click.
-  if (spaceDown) return;
-  // Left = select
-  if (e.button === 0) {
-    const id = pickGrass(e);
-    if (id != null) setSelected(id);
-    return;
-  }
+  // Left button selection happens on mouseup (so we can distinguish click vs drag-pan).
+  if (e.button === 0) return;
 
   // Right = place/remove
   if (e.button === 2) {
@@ -1276,24 +1739,41 @@ viewCanvas.addEventListener('mousedown', (e) => {
     if (placementMode) {
       const block = placementBlock.clone();
       activeBlock.copy(block);
-      el.blockX.value = String(block.x);
-      el.blockY.value = String(block.y);
-      el.blockZ.value = String(block.z);
       addGrass(block, { ...placementOff });
       exitPlacementMode();
       return;
     }
 
     // Otherwise: enter placement mode.
-    setActiveBlockFromInputs();
-    enterPlacementMode(activeBlock.y);
+    // Start placement in front of the camera at the camera's current Y level
+    // (more intuitive than using a potentially stale active block Y).
+    const start = computeBlockInFrontOfCameraSameY();
+    enterPlacementModeAtBlock(start);
     // Snap preview under the cursor immediately.
     updatePlacementPreviewFromEvent(e);
   }
 });
 
+// Left-click selects (only if it was not a pan-drag).
+viewCanvas.addEventListener('mouseup', (e) => {
+  if (e.button !== 0) return;
+  // If the user dragged to pan, don't also select.
+  if (didPanDrag) return;
+  const id = pickGrass(e);
+  if (id != null) setSelected(id);
+});
+
 // --- Keyboard offsets: WASD/arrows X/Z, R/F Y ---
 window.addEventListener('keydown', (e) => {
+  // Grass texture quick toggle (ignore when typing in inputs)
+  const tag0 = document.activeElement?.tagName?.toLowerCase();
+  const typing0 = (tag0 === 'input' || tag0 === 'textarea' || tag0 === 'select');
+  if (!typing0 && (e.key === '1' || e.key === '2')) {
+    setGrassTexture(e.key === '1' ? 'jappa' : 'prog');
+    e.preventDefault();
+    return;
+  }
+
   // DEL is the only way to delete foliage.
   if (!placementMode && e.key === 'Delete') {
     const tag = document.activeElement?.tagName?.toLowerCase();

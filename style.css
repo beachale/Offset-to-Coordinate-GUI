@@ -89,6 +89,21 @@ details[open] summary{
   padding: 10px 12px;
 }
 
+.row.fov-nudge{
+  padding-top: 0;
+}
+
+.fov-warning{
+  flex: 1 1 100%;
+  color: #ff5b5b;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.row.fov-nudge label.toggle{
+  flex: 1 1 100%;
+}
+
 label{
   display:flex;
   align-items:center;
@@ -336,6 +351,31 @@ code{
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px dashed rgba(255,255,255,0.10);
+}
+
+.hidden{ display: none; }
+
+.tex-indicator{
+  position:absolute;
+  left:10px;
+  bottom:10px;
+  font-size:12px;
+  padding:6px 8px;
+  border-radius:10px;
+  background:rgba(0,0,0,0.55);
+  color:#fff;
+  pointer-events:none;
+  user-select:none;
+}
+
+.warning{
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 214, 92, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 214, 92, 0.08);
+  color: rgba(255,255,255,0.86);
+  font-size: 12px;
 }
 #crackOut{
   width: 100%;
