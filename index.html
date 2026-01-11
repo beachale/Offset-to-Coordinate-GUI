@@ -173,6 +173,9 @@
 
     <main class="workspace" aria-label="Workspace">
       <div class="viewport" aria-label="Viewport (960×540)">
+        <div class="canvas-topright">
+          <label class="toggle progart"><input id="progArtToggle" type="checkbox" /> Programmer Art</label>
+        </div>
       <canvas id="view" width="960" height="540"></canvas>
       <div class="foliage-picker" title="Choose which foliage type you are placing">
         <label>Foliage
@@ -194,6 +197,19 @@
             <select id="variantDir">
               <option value="up">up</option>
               <option value="down">down</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="propaguleControls" class="variant-controls hidden" title="Mangrove propagule model">
+          <label>Propagule model
+            <select id="propaguleModel">
+              <option value="ground">ground</option>
+              <option value="hanging_0">hanging0</option>
+              <option value="hanging_1">hanging1</option>
+              <option value="hanging_2">hanging2</option>
+              <option value="hanging_3">hanging3</option>
+              <option value="hanging_4">hanging4</option>
             </select>
           </label>
         </div>

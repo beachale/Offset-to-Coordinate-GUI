@@ -1,10 +1,59 @@
-﻿const foliageMatCache = new Map();
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+const foliageMatCache = new Map();
+
+// Float32 helper (matches Java's (float) casts via Math.fround)
+const f = Math.fround;
 
 // --- Minecraft block textures ---
 // We load foliage textures directly from the Minecraft assets repo you linked.
 // (This keeps the zip tiny while still supporting many foliage types.)
 const MC_ASSETS_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-1/assets/minecraft/textures/block/';
+const PROGRAMMER_ART_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/Faithful-Pack/Default-Programmer-Art/refs/heads/1.21.10/assets/minecraft/textures/block/';
+
+// Explicit whitelist of textures we swap to Programmer Art.
+// Using explicit URLs avoids filename mismatches across versions (e.g. grass/short_grass renames).
+const PROGRAMMER_ART_URLS = Object.freeze({
+  // Flowers
+  red_tulip: PROGRAMMER_ART_BLOCK_TEX_BASE + 'red_tulip.png',
+  pink_tulip: PROGRAMMER_ART_BLOCK_TEX_BASE + 'pink_tulip.png',
+  white_tulip: PROGRAMMER_ART_BLOCK_TEX_BASE + 'white_tulip.png',
+  orange_tulip: PROGRAMMER_ART_BLOCK_TEX_BASE + 'orange_tulip.png',
+  allium: PROGRAMMER_ART_BLOCK_TEX_BASE + 'allium.png',
+  blue_orchid: PROGRAMMER_ART_BLOCK_TEX_BASE + 'blue_orchid.png',
+  poppy: PROGRAMMER_ART_BLOCK_TEX_BASE + 'poppy.png',
+  dandelion: PROGRAMMER_ART_BLOCK_TEX_BASE + 'dandelion.png',
+  oxeye_daisy: PROGRAMMER_ART_BLOCK_TEX_BASE + 'oxeye_daisy.png',
+
+  // Foliage
+  fern: PROGRAMMER_ART_BLOCK_TEX_BASE + 'fern.png',
+  short_grass: PROGRAMMER_ART_BLOCK_TEX_BASE + 'short_grass.png',
+  tall_grass_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'tall_grass_top.png',
+  tall_grass_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'tall_grass_bottom.png',
+  large_fern_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'large_fern_top.png',
+  large_fern_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'large_fern_bottom.png',
+
+  // Tall flowers
+  sunflower_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'sunflower_top.png',
+  sunflower_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'sunflower_bottom.png',
+  lilac_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'lilac_top.png',
+  lilac_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'lilac_bottom.png',
+  rose_bush_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'rose_bush_top.png',
+  rose_bush_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'rose_bush_bottom.png',
+  peony_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'peony_top.png',
+  peony_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'peony_bottom.png',
+});
+
+const PROGRAMMER_ART_KEYS = new Set(Object.keys(PROGRAMMER_ART_URLS));
+let useProgrammerArt = false;
+
+function blockTextureUrl(key){
+  const k = String(key || '').trim();
+  if (useProgrammerArt && PROGRAMMER_ART_KEYS.has(k)) return PROGRAMMER_ART_URLS[k];
+  return `${MC_ASSETS_BLOCK_TEX_BASE}${encodeURIComponent(k)}.png`;
+}
+
+const MC_ASSETS_BLOCK_MODEL_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-1/assets/minecraft/models/block/';
 
 // Some vanilla foliage textures are grayscale and are normally tinted by the game.
 // This tool doesn't simulate biome tinting, so we apply a fixed color overlay for
@@ -14,6 +63,9 @@ function isGrayscaleFoliage(id){
   return id === 'SHORT_GRASS' || id === 'TALL_GRASS' || id === 'FERN' || id === 'LARGE_FERN';
 }
 const TINTED_CROSS_MODEL = {"ambientocclusion":false,"textures":{"particle":"#cross"},"elements":[{"from":[0.8,0,8],"to":[15.2,16,8],"rotation":{"origin":[8,8,8],"axis":"y","angle":45,"rescale":true},"shade":false,"faces":{"north":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0},"south":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0}}},{"from":[8,0,0.8],"to":[8,16,15.2],"rotation":{"origin":[8,8,8],"axis":"y","angle":45,"rescale":true},"shade":false,"faces":{"west":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0},"east":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0}}}]};
+
+// --- Block model cache (for special cases like mangrove propagules) ---
+const blockModelCache = new Map();
 
 // --- Viewport vs workspace ---
 // The on-page viewport is a fixed 960Ã—540 canvas.
@@ -40,12 +92,37 @@ let zoom = 1;
 // Yaw (degrees): 0 faces +Z, -90 faces +X, 180/-180 faces -Z, 90 faces -X.
 // Pitch (degrees): 0 level, +90 looks straight down, -90 looks straight up.
 function mcForwardFromYawPitch(yawDeg, pitchDeg) {
-  const yaw = THREE.MathUtils.degToRad(yawDeg);
-  const pitch = THREE.MathUtils.degToRad(pitchDeg);
-  const fx = -Math.sin(yaw) * Math.cos(pitch);
-  const fy = -Math.sin(pitch);
-  const fz =  Math.cos(yaw) * Math.cos(pitch);
-  return new THREE.Vector3(fx, fy, fz).normalize();
+  // 1. Convert inputs to float32 first
+  const yawF = f(yawDeg);
+  const pitchF = f(pitchDeg);
+
+  // 2. Convert to radians using the float constant.
+  // IMPORTANT: Minecraft's look-vector helper is Vec3.directionFromRotation(pitch,yaw),
+  // which applies the following float operations (see unobfuscated jar):
+  //   yRot = (-yaw * RAD_PER_DEG) - PI
+  //   xRot = (-pitch * RAD_PER_DEG)
+  // This PI shift flips the camera basis to match MC's +Z=south, +X=east convention.
+  const xRotRad = f(-pitchF * RAD_PER_DEG);
+  const yRotRad = f(f(-yawF * RAD_PER_DEG) - PI_F);
+
+  // 3. Trig results must be cast to float immediately
+  const cosPitch = f(Math.cos(xRotRad));
+  const sinPitch = f(Math.sin(xRotRad));
+  const cosYaw = f(Math.cos(yRotRad));
+  const sinYaw = f(Math.sin(yRotRad));
+
+  // 4. Calculate Forward Vector components (Standard MC "Look" Vector)
+  // 4. Calculate Forward Vector components (exact MC ordering)
+  // Java (directionFromRotation):
+  //   float f4 = -Mth.cos(xRot);
+  //   return new Vec3(Mth.sin(yRot) * f4, Mth.sin(xRot), Mth.cos(yRot) * f4);
+  const negCosPitch = f(-cosPitch);
+  const vx = f(sinYaw * negCosPitch);
+  const vy = f(sinPitch);
+  const vz = f(cosYaw * negCosPitch);
+
+  // IMPORTANT: do NOT normalize (Minecraft's float math can be microscopically off-unit).
+  return new THREE.Vector3(vx, vy, vz);
 }
 
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
@@ -66,8 +143,8 @@ function wrap(v, a, b){
 //
 // ManualGrass uses 0..15 integers per axis; those map directly to the same
 // 4-bit ranges used by Minecraft's offset function.
-const MC_MAX_HORIZ_OFF = 0.25;
-const MC_MAX_VERT_OFF  = 0.2;
+const MC_MAX_HORIZ_OFF = f(0.25);
+const MC_MAX_VERT_OFF  = f(0.2);
 
 // Pointed dripstone uses a smaller maximum horizontal offset than the default foliage grid.
 // Vanilla (1.21.x): PointedDripstoneBlock.getMaxHorizontalOffset() = 0.125 (1/8).
@@ -80,22 +157,25 @@ function getMaxHorizontalOffsetForKind(kind){
 function offsetToVec3ForKind(kind, offX, offY, offZ) {
   const maxH = getMaxHorizontalOffsetForKind(kind);
 
-  // IMPORTANT (vanilla parity):
-  // Offsets are *picked* on the default foliage lattice (±0.25, 16 steps; step = 1/30),
-  // then Minecraft clamps X/Z to ±getMaxHorizontalOffset(). For pointed dripstone this
-  // produces duplicated edge values (10 unique per axis -> 100 unique XZ positions).
-  // So we must compute raw X/Z using the default span, not the clamped span.
-  const spanHRaw = 2 * MC_MAX_HORIZ_OFF; // 0.5
+  // 1. Force the input to be an integer nibble (0..15)
+  const iX = clampInt(Math.floor(offX), 0, 15);
+  const iY = clampInt(Math.floor(offY), 0, 15);
+  const iZ = clampInt(Math.floor(offZ), 0, 15);
 
-  // 0..15 -> [-0.25, +0.25] inclusive (raw lattice)
-  const xRaw = ((offX / 15) - 0.5) * spanHRaw;
-  const zRaw = ((offZ / 15) - 0.5) * spanHRaw;
-  const yRaw = ((offY / 15) - 1.0) * MC_MAX_VERT_OFF;
+  // 2. Calculate the raw float offset (Standard Minecraft Formula)
+  //    Java: (float)i / 15.0F * 0.5F - 0.25F
+  let x = f((iX / 15.0) * 0.5 - 0.25);
+  let z = f((iZ / 15.0) * 0.5 - 0.25);
 
-  // Minecraft clamps X/Z to +/- getMaxHorizontalOffset().
-  const x = clamp(xRaw, -maxH, maxH);
-  const z = clamp(zRaw, -maxH, maxH);
-  return new THREE.Vector3(x, yRaw, z);
+  // Vertical offset is standard for OffsetType.XYZ:
+  // Java: (float)i / 15.0F * 0.2F - 0.2F  -> [-0.2, 0]
+  const y = f((iY / 15.0) * MC_MAX_VERT_OFF - MC_MAX_VERT_OFF);
+
+  // 3. Apply per-block maximum horizontal offset via clamp ("fold" for dripstone)
+  x = f(clamp(x, -maxH, maxH));
+  z = f(clamp(z, -maxH, maxH));
+
+  return new THREE.Vector3(x, y, z);
 }
 
 // --- Viewport canvas (2D compositor) + Three.js renderer (offscreen WebGL) ---
@@ -254,10 +334,18 @@ function updateHelpersAroundPlayer(feetPos) {
   }
 }
 
+// --- Precision helpers ---
+// Minecraft (Java) uses 32-bit floats for key camera/offset math.
+// Emulate float32 rounding with Math.fround so values match "under a microscope".
+// (f is defined near the top of the module.)
+// Use the same casting order you'd get from Java floats.
+const PI_F = f(Math.PI);
+const RAD_PER_DEG = f(PI_F / f(180.0));
+
 // Vanilla player eye height (standing). Minecraft uses 1.62 blocks for the camera.
 // We use this to optionally let the UI show/accept feet Y (Minecraft F3 "XYZ")
 // while the actual camera runs at eye Y.
-const EYE_HEIGHT = 1.62;
+const EYE_HEIGHT = f(1.62);
 
 let originMarker = null;
 
@@ -286,6 +374,7 @@ scene.add(ground);
 // --- UI ---
 const el = {
   viewport: document.querySelector('.viewport'),
+  progArtToggle: document.getElementById('progArtToggle'),
   camX: document.getElementById('camX'),
   camY: document.getElementById('camY'),
   useFeetY: document.getElementById('useFeetY'),
@@ -336,6 +425,8 @@ const el = {
   variantControls: document.getElementById('variantControls'),
   variantHeight: document.getElementById('variantHeight'),
   variantDir: document.getElementById('variantDir'),
+  propaguleControls: document.getElementById('propaguleControls'),
+  propaguleModel: document.getElementById('propaguleModel'),
   exportOffsets: document.getElementById('exportOffsets'),
   exportBox: document.getElementById('exportBox'),
   grassDataIn: document.getElementById('grassDataIn'),
@@ -693,9 +784,26 @@ function updateCameraFromUI(){
 
   // Old Minecraft (e.g. 1.11) first-person rendering nudges the view forward by +0.05 in view direction.
   // Emulate that here when requested so overlays match older screenshots.
-  const camPos = new THREE.Vector3(x, yEye, z).addScaledVector(forward, nudge);
+  // Match Java's float32 rounding for camera math.
+  const xF = f(x);
+  const yEyeF = f(yEye);
+  const zF = f(z);
+  const nudgeF = f(nudge);
+
+  const camPos = new THREE.Vector3(
+    f(xF + f(forward.x * nudgeF)),
+    f(yEyeF + f(forward.y * nudgeF)),
+    f(zF + f(forward.z * nudgeF))
+  );
+
   camera.position.copy(camPos);
-  camera.lookAt(new THREE.Vector3().copy(camPos).add(forward));
+
+  // Apply lookAt using float-rounded addition (matches MC's float math order).
+  camera.lookAt(
+    f(camPos.x + forward.x),
+    f(camPos.y + forward.y),
+    f(camPos.z + forward.z)
+  );
 
   if (feetMode) {
     const yFeet = yInput;
@@ -718,9 +826,14 @@ old nudge = ${useOldNudge ? '+0.05' : 'off'}`;
   }
 
   // Keep helper visuals centered around the player (3x3 chunks) and prevent the grid/borders from stopping at +/-32.
+  // These helpers don't exist in vanilla, but they *do* depend on camera position.
+  // Round to float32 so boundary-sensitive behavior (e.g. when you're right on a block edge)
+  // stays consistent with the rest of the float32 camera pipeline.
   const feetY = feetMode ? yInput : (yEye - EYE_HEIGHT);
-  updateHelpersAroundPlayer(new THREE.Vector3(x, feetY, z));
-  ground.position.set(x, 0, z);
+  const feetYF = f(feetY);
+
+  updateHelpersAroundPlayer(new THREE.Vector3(xF, feetYF, zF));
+  ground.position.set(xF, 0, zF);
 }
 
 function syncCamYDisplayToMode() {
@@ -785,6 +898,21 @@ syncGrassUI();
 //   2 = Programmer Art
 const texIndicatorEl = document.getElementById('texIndicator');
 
+function syncTexIndicator(){
+  if (texIndicatorEl) texIndicatorEl.textContent = `Grass texture: ${useProgrammerArt ? 'Programmer Art' : 'Jappa'}`;
+  if (el.progArtToggle) el.progArtToggle.checked = useProgrammerArt;
+}
+
+if (el.progArtToggle){
+  el.progArtToggle.addEventListener('change', async () => {
+    useProgrammerArt = Boolean(el.progArtToggle.checked);
+    syncTexIndicator();
+    try { await refreshAllFoliageTextures(); } catch (e) { console.warn('Failed to refresh textures', e); }
+  });
+}
+syncTexIndicator();
+
+
 const texLoader = new THREE.TextureLoader();
 texLoader.setCrossOrigin('anonymous');
 
@@ -847,6 +975,60 @@ const PLACEHOLDER_TEX = makePlaceholderTexture();
 // Cache textures by name (e.g. 'fern', 'tall_grass_bottom').
 const textureCache = new Map();
 
+
+function clearProgrammerArtTextureCache(){
+  // Because the cache key is just the texture name, switching packs
+  // requires invalidating any texture names we may swap.
+  for (const k of PROGRAMMER_ART_KEYS) textureCache.delete(k);
+}
+
+async function refreshAllFoliageTextures(){
+  clearProgrammerArtTextureCache();
+  // Helpful visibility when diagnosing pack switches.
+  console.info('[Texture Pack] Refreshing foliage textures:', useProgrammerArt ? 'Programmer Art' : 'Jappa');
+  const jobs = [];
+  for (const mats of foliageMatCache.values()){
+    if (!mats) continue;
+    // We have a few material shapes:
+    //  - single: { base, selected, placement, __tex }
+    //  - double: { baseBottom/baseTop..., __texBottom/__texTop }
+    //  - propagule: { base, selected, placement, __tex }
+    // Older code also used __texSingle; support it defensively.
+    if (mats.model === 'double' || mats.__texBottom || mats.__texTop) {
+      jobs.push((async () => {
+        const bt = await getBlockTexture(mats.__texBottom);
+        const tt = await getBlockTexture(mats.__texTop);
+        for (const m of [mats.baseBottom, mats.selectedBottom, mats.placementBottom]){ if (m){ m.map = bt; m.needsUpdate = true; } }
+        for (const m of [mats.baseTop, mats.selectedTop, mats.placementTop]){ if (m){ m.map = tt; m.needsUpdate = true; } }
+      })());
+      continue;
+    }
+
+    // single / propagule
+    const texKey = mats.__texSingle || mats.__tex;
+    if (texKey && (mats.base || mats.selected || mats.placement)){
+      jobs.push((async () => {
+        const t0 = await getBlockTexture(texKey);
+
+        // Bamboo needs per-user UV shifting; keep the original behavior.
+        let t = t0;
+        // We don't have the foliage id here; detect bamboo by tex key.
+        if (String(texKey) === 'bamboo_stalk') {
+          t = t0.clone();
+          applyBambooUvToTexture(t);
+        }
+
+        for (const m of [mats.base, mats.selected, mats.placement]){ if (m){ m.map = t; m.needsUpdate = true; } }
+      })());
+    }
+  }
+  await Promise.all(jobs);
+}
+
+// Cache block model JSON by name (e.g. 'mangrove_propagule_hanging_0').
+// Values are Promises that resolve to a parsed model object (or null on failure).
+const modelJsonCache = new Map();
+
 async function getBlockTexture(texName){
   const key = String(texName || '').trim();
   if (!key) return PLACEHOLDER_TEX;
@@ -854,7 +1036,7 @@ async function getBlockTexture(texName){
 
   // Insert placeholder immediately to avoid thundering-herd loads.
   textureCache.set(key, PLACEHOLDER_TEX);
-  const url = `${MC_ASSETS_BLOCK_TEX_BASE}${encodeURIComponent(key)}.png`;
+  const url = blockTextureUrl(key);
 
   try {
     const t = await texLoader.loadAsync(url);
@@ -863,10 +1045,23 @@ async function getBlockTexture(texName){
     textureCache.set(key, t);
     return t;
   } catch (e) {
-    console.warn('Failed to load texture', key, e);
+    console.warn('Failed to load texture', { key, url }, e);
     textureCache.set(key, PLACEHOLDER_TEX);
     return PLACEHOLDER_TEX;
   }
+}
+
+function getBlockModelJSON(modelName){
+  const key = String(modelName || '').trim();
+  if (!key) return Promise.resolve(null);
+  if (modelJsonCache.has(key)) return modelJsonCache.get(key);
+
+  const url = `${MC_ASSETS_BLOCK_MODEL_BASE}${encodeURIComponent(key)}.json`;
+  const p = fetch(url)
+    .then(r => (r && r.ok) ? r.json() : null)
+    .catch(() => null);
+  modelJsonCache.set(key, p);
+  return p;
 }
 
 // --- Foliage catalog ---
@@ -1041,6 +1236,53 @@ function syncBambooUvUI(){
 let activeVariantHeight = 1;        // 1..16
 let activeVariantDir = 'up';        // 'up' or 'down' (for dripstone)
 
+// Mangrove propagule has multiple distinct vanilla models (ground + hanging ages 0..4).
+// Default: ground.
+let activePropaguleModel = 'ground'; // 'ground' | 'hanging_0'..'hanging_4'
+
+function foliageSupportsPropaguleModel(foliageId){
+  return foliageId === 'MANGROVE_PROPAGULE';
+}
+
+function propaguleModelToBlockModelName(v){
+  const s = String(v || 'ground');
+  if (s === 'ground') return 'mangrove_propagule';
+  const m = s.match(/^hanging_(\d)$/);
+  if (m) return `mangrove_propagule_hanging_${m[1]}`;
+  return 'mangrove_propagule';
+}
+
+function propaguleModelToTextureName(v){
+  // Ground uses block/mangrove_propagule; hanging models share block/mangrove_propagule_hanging.
+  return (String(v) === 'ground') ? 'mangrove_propagule' : 'mangrove_propagule_hanging';
+}
+
+// Extract a usable block texture key from a minecraft block-model json.
+// Examples:
+//  - 'block/mangrove_propagule_hanging' -> 'mangrove_propagule_hanging'
+//  - 'minecraft:block/grass_block_top'  -> 'grass_block_top'
+function textureNameFromMcModel(model){
+  try {
+    const tex = model && model.textures;
+    if (!tex) return null;
+
+    // Prefer a non-particle layer if present.
+    const raw = tex.propagule ?? tex.cross ?? tex.layer0 ?? tex.all ?? tex.texture ?? tex.particle;
+    if (!raw) return null;
+
+    // Strip namespace.
+    let s = String(raw);
+    if (s.startsWith('#')) return null; // unresolved indirection; caller should resolve parents if needed
+    const colon = s.indexOf(':');
+    if (colon >= 0) s = s.slice(colon + 1);
+    // Strip any folder prefixes.
+    if (s.includes('/')) s = s.split('/').pop();
+    return s || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function foliageSupportsHeight(foliageId){
   return foliageId === 'BAMBOO' || foliageId === 'POINTED_DRIPSTONE';
 }
@@ -1069,6 +1311,15 @@ function syncVariantControls(){
     dEl.parentElement?.classList?.toggle('hidden', !foliageSupportsDir(activeFoliageId));
     dEl.value = activeVariantDir;
   }
+}
+
+function syncPropaguleControls(){
+  const box = el.propaguleControls;
+  if (!box) return;
+  const show = foliageSupportsPropaguleModel(activeFoliageId);
+  box.classList.toggle('hidden', !show);
+  if (!show) return;
+  if (el.propaguleModel) el.propaguleModel.value = String(activePropaguleModel || 'ground');
 }
 
 function getActiveVariantFor(foliageId){
@@ -1108,7 +1359,8 @@ function setPlacementFoliage(id){
   syncGrassTextureIndicator();
   syncVariantControls();
 
-    showHideBambooUvControls();
+  showHideBambooUvControls();
+  syncPropaguleControls();
 // If we are in placement mode, rebuild preview immediately.
   if (typeof placementMode !== 'undefined' && placementMode) {
     ensurePlacementOffsetRules();
@@ -1140,6 +1392,46 @@ el.bambooUvV?.addEventListener('input', () => {
 
 // Variant controls wiring
 syncVariantControls();
+syncPropaguleControls();
+
+el.propaguleModel?.addEventListener('change', () => {
+  activePropaguleModel = String(el.propaguleModel.value || 'ground');
+
+  // If we're placing, rebuild the preview so the model updates immediately.
+  if (typeof placementMode !== 'undefined' && placementMode) {
+    ensurePlacementPreview();
+  }
+
+  // If a mangrove propagule is currently selected, apply the model change to it as well.
+  try {
+    if (selectedId != null) {
+      const g = grasses.get(selectedId);
+      if (g && g.kind === 'MANGROVE_PROPAGULE') {
+        g.propaguleModel = activePropaguleModel;
+
+        // Rebuild the mesh using the chosen vanilla block model.
+        const pmats = ensurePropaguleMats(g.propaguleModel);
+        const mat = pmats.selected; // since it's selected
+        const modelName = propaguleModelToBlockModelName(g.propaguleModel);
+
+        const newMesh = makeAsyncMinecraftModelMesh(modelName, mat);
+        newMesh.userData.__grassId = g.id;
+
+        grassGroup.remove(g.mesh);
+        grassGroup.add(newMesh);
+        g.mesh = newMesh;
+
+        updateGrassMeshTransform(g);
+        refreshGrassList();
+        setSelected(g.id);
+      }
+    }
+  } catch (_) {
+    // no-op (defensive: selection state not ready yet)
+  }
+});
+
+
 el.variantHeight?.addEventListener('input', () => {
   activeVariantHeight = Math.max(1, Math.min(16, Math.trunc(num(el.variantHeight.value, activeVariantHeight))));
   if (typeof placementMode !== 'undefined' && placementMode) {
@@ -1196,7 +1488,9 @@ function texNamesForFoliage(id){
     case 'NETHER_SPROUTS': return { single: 'nether_sprouts' };
     case 'HANGING_ROOTS': return { single: 'hanging_roots' };
     case 'MANGROVE_PROPAGULE': return { single: 'mangrove_propagule' };
-    case 'BAMBOO_SAPLING': return { single: 'bamboo_sapling' };
+    // Bamboo "sapling" (shoot) uses the stage0 texture in vanilla.
+    // (The block model's texture is `block/bamboo_stage0`, not `bamboo_sapling`.)
+    case 'BAMBOO_SAPLING': return { single: 'bamboo_stage0' };
     case 'BAMBOO':
       // Bamboo is a multi-model block in-game; as a simple preview, use the stalk texture.
       return { single: 'bamboo_stalk' };
@@ -1336,6 +1630,45 @@ function ensureFoliageMats(id){
 return mats;
 }
 
+/**
+ * Mangrove propagule uses different vanilla models and textures depending on whether it is
+ * on the ground or hanging (age 0..4). We keep separate materials per variant so the
+ * correct texture is loaded and reused.
+ */
+function ensurePropaguleMats(variantKey){
+  const v = String(variantKey || 'ground');
+  const cacheKey = `MANGROVE_PROPAGULE__${v}`;
+  if (foliageMatCache.has(cacheKey)) return foliageMatCache.get(cacheKey);
+
+  const base = makePlantMaterial(PLACEHOLDER_TEX);
+  base.color.setHex(0xdddddd);
+  const selected = base.clone();
+  selected.color.setHex(0xdb8484);
+  selected.depthTest = true;
+  selected.depthWrite = true;
+
+  const placement = base.clone();
+  placement.color.setHex(0xd6d6d6);
+  placement.opacity = clamp(grassOpacity * 0.65, 0, 1);
+  placement.transparent = true;
+  placement.depthWrite = false;
+
+  const mats = { model: 'propagule', base, selected, placement, __tex: propaguleModelToTextureName(v), __variant: v };
+  foliageMatCache.set(cacheKey, mats);
+
+  (async () => {
+    // Prefer the texture referenced by the model JSON itself (more robust than manual mapping).
+    const modelName = propaguleModelToBlockModelName(v);
+    const model = await getBlockModelJSON(modelName);
+    const inferred = textureNameFromMcModel(model);
+    const texKey = inferred || mats.__tex;
+    const t = await getBlockTexture(texKey);
+    for (const m of [base, selected, placement]) { m.map = t; m.needsUpdate = true; }
+  })();
+
+  return mats;
+}
+
 // Apply initial grass opacity to placement materials.
 syncGrassOpacityUI();
 
@@ -1374,6 +1707,212 @@ function mcRescaleVec(axis, angleDeg, rescale) {
 }
 
 const grassModel = TINTED_CROSS_MODEL;
+
+// --- Generic Minecraft "block model" renderer (subset) ---
+// We implement just enough of vanilla block model JSON to render mangrove propagules:
+// - elements: from/to boxes (including 0-thickness "planes")
+// - faces: per-face UV mapping + optional rotation (0/90/180/270)
+// - element rotation with rescale, using the same mcRescaleVec() parity helper as plants
+
+function rotateUvQuad(quad, rotDeg){
+  // quad is [[u,v], [u,v], [u,v], [u,v]] in PlaneGeometry vertex order: TL, TR, BL, BR
+  const r = ((Number(rotDeg) || 0) % 360 + 360) % 360;
+  if (r === 0) return quad;
+  // Minecraft rotates face UVs clockwise in 90° steps.
+  if (r === 90)  return [quad[2], quad[0], quad[3], quad[1]]; // clockwise
+  if (r === 180) return [quad[3], quad[2], quad[1], quad[0]];
+  if (r === 270) return [quad[1], quad[3], quad[0], quad[2]];
+  return quad;
+}
+
+function applyFaceUvToPlaneGeometry(geo, uvPix, rotDeg){
+  if (!geo || !geo.attributes?.uv || !Array.isArray(uvPix) || uvPix.length < 4) return;
+  const u1 = uvPix[0] / 16;
+  const v1t = 1 - (uvPix[1] / 16); // top
+  const u2 = uvPix[2] / 16;
+  const v2b = 1 - (uvPix[3] / 16); // bottom
+
+  let quad = [
+    [u1, v1t], // TL
+    [u2, v1t], // TR
+    [u1, v2b], // BL
+    [u2, v2b], // BR
+  ];
+  quad = rotateUvQuad(quad, rotDeg);
+  const arr = geo.attributes.uv.array;
+  // PlaneGeometry uses 4 vertices with uv order TL, TR, BL, BR
+  arr[0] = quad[0][0]; arr[1] = quad[0][1];
+  arr[2] = quad[1][0]; arr[3] = quad[1][1];
+  arr[4] = quad[2][0]; arr[5] = quad[2][1];
+  arr[6] = quad[3][0]; arr[7] = quad[3][1];
+  geo.attributes.uv.needsUpdate = true;
+}
+
+// Resolve a Minecraft block model texture reference to a concrete texture name.
+// Examples:
+//  - "#front" -> model.textures.front -> "block/sunflower_front" -> "sunflower_front"
+//  - "minecraft:block/mangrove_propagule_hanging" -> "mangrove_propagule_hanging"
+function resolveMcModelTextureName(model, texRef){
+  if (!texRef) return null;
+  let t = String(texRef);
+  // Resolve indirections like "#top".
+  for (let i=0; i<8 && t.startsWith('#'); i++){
+    const key = t.slice(1);
+    const next = model?.textures?.[key];
+    if (!next) break;
+    t = String(next);
+  }
+
+  // Strip namespace.
+  if (t.startsWith('minecraft:')) t = t.slice('minecraft:'.length);
+
+  // Strip directories (block/foo -> foo, item/foo -> foo).
+  if (t.includes('/')) t = t.split('/').pop();
+  return t || null;
+}
+
+function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = {}){
+  const root = new THREE.Group();
+  if (!model || !Array.isArray(model.elements)) return root;
+
+  // Optional per-face material support (needed for sunflower_top which uses multiple textures).
+  // Keyed by texture name so we reuse material instances within the same build.
+  const perFaceMatCache = new Map();
+
+  function getMatForFace(face){
+    if (!perFaceMaterials) return material;
+    const texName = resolveMcModelTextureName(model, face?.texture);
+    if (!texName) return material;
+    if (perFaceMatCache.has(texName)) return perFaceMatCache.get(texName);
+
+    const m = material.clone();
+    m.map = PLACEHOLDER_TEX;
+    m.needsUpdate = true;
+    // Carry selection tint metadata so special-case selection logic can work.
+    m.userData.__mcTexName = texName;
+    perFaceMatCache.set(texName, m);
+
+    (async () => {
+      const t = await getBlockTexture(texName);
+      m.map = t;
+      m.needsUpdate = true;
+    })();
+
+    return m;
+  }
+
+  for (const elmt of model.elements) {
+    const from = (elmt.from ?? [0,0,0]).map(v => v / 16);
+    const to   = (elmt.to   ?? [16,16,16]).map(v => v / 16);
+
+    const sx = Math.abs(to[0] - from[0]);
+    const sy = Math.abs(to[1] - from[1]);
+    const sz = Math.abs(to[2] - from[2]);
+    const cx = (from[0] + to[0]) / 2;
+    const cy = (from[1] + to[1]) / 2;
+    const cz = (from[2] + to[2]) / 2;
+
+    const faces = elmt.faces ?? {};
+    const elementGroup = new THREE.Group();
+
+    function addFacePlane(which){
+      const f = faces[which];
+      if (!f) return;
+      const uv = f.uv;
+      const rot = f.rotation ?? 0;
+
+      const faceMat = getMatForFace(f);
+
+      let w=0, h=0;
+      let mesh=null;
+
+      if (which === 'north' || which === 'south') {
+        w = sx; h = sy;
+        const geo = new THREE.PlaneGeometry(w, h);
+        applyFaceUvToPlaneGeometry(geo, uv, rot);
+        mesh = new THREE.Mesh(geo, faceMat);
+        mesh.position.set(cx, cy, (which === 'north') ? from[2] : to[2]);
+        if (which === 'north') mesh.rotation.y = Math.PI;
+      } else if (which === 'east' || which === 'west') {
+        w = sz; h = sy;
+        const geo = new THREE.PlaneGeometry(w, h);
+        applyFaceUvToPlaneGeometry(geo, uv, rot);
+        mesh = new THREE.Mesh(geo, faceMat);
+        mesh.position.set((which === 'west') ? from[0] : to[0], cy, cz);
+        // PlaneGeometry faces +Z by default; rotate so the face normal matches Minecraft.
+        mesh.rotation.y = (which === 'west') ? -Math.PI/2 : Math.PI/2;
+      } else if (which === 'up' || which === 'down') {
+        w = sx; h = sz;
+        const geo = new THREE.PlaneGeometry(w, h);
+        applyFaceUvToPlaneGeometry(geo, uv, rot);
+        mesh = new THREE.Mesh(geo, faceMat);
+        mesh.position.set(cx, (which === 'down') ? from[1] : to[1], cz);
+        mesh.rotation.x = (which === 'down') ? Math.PI/2 : -Math.PI/2;
+      }
+
+      if (mesh) {
+        // Mark for raycasting like other foliage.
+        mesh.userData.__isGrassPart = true;
+        elementGroup.add(mesh);
+      }
+    }
+
+    // Add all supported faces present in the json.
+    addFacePlane('north');
+    addFacePlane('south');
+    addFacePlane('east');
+    addFacePlane('west');
+    addFacePlane('up');
+    addFacePlane('down');
+
+    // Apply element rotation (with rescale) exactly like Minecraft (same approach as makeGrassMesh).
+    if (elmt.rotation) {
+      const axis = String(elmt.rotation.axis).toLowerCase();
+      const angleDeg = Number(elmt.rotation.angle ?? 0);
+      const origin = (elmt.rotation.origin ?? [8, 8, 8]).map(v => v / 16);
+      const rescale = Boolean(elmt.rotation.rescale);
+      const sVec = mcRescaleVec(axis, angleDeg, rescale);
+
+      const scaleGroup = new THREE.Group();
+      scaleGroup.position.set(origin[0], origin[1], origin[2]);
+      scaleGroup.scale.copy(sVec);
+
+      const rotGroup = new THREE.Group();
+      if (axis === 'x') rotGroup.rotation.x = THREE.MathUtils.degToRad(angleDeg);
+      else if (axis === 'y') rotGroup.rotation.y = THREE.MathUtils.degToRad(angleDeg);
+      else rotGroup.rotation.z = THREE.MathUtils.degToRad(angleDeg);
+
+      // Offset the element so rotation happens around origin.
+      elementGroup.position.set(-origin[0], -origin[1], -origin[2]);
+      rotGroup.add(elementGroup);
+      scaleGroup.add(rotGroup);
+      root.add(scaleGroup);
+    } else {
+      root.add(elementGroup);
+    }
+  }
+
+  return root;
+}
+
+function makeAsyncMinecraftModelMesh(modelName, material, opts = undefined){
+  const root = new THREE.Group();
+  root.userData.__isGrassPart = true;
+
+  (async () => {
+    const model = await getBlockModelJSON(modelName);
+    if (!model) return;
+    // Remove any old children and rebuild.
+    while (root.children.length) {
+      const c = root.children.pop();
+      if (c) root.remove(c);
+    }
+    const built = buildMinecraftModelGroup(model, material, opts);
+    root.add(...built.children);
+  })();
+
+  return root;
+}
 
 function makeGrassMesh(mat){
   const mtl = mat ?? makePlantMaterial(PLACEHOLDER_TEX);
@@ -1492,10 +2031,48 @@ function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
     return makeDripstoneStackMesh(mats.placement, variant?.height ?? 1, variant?.dir ?? 'up');
   }
 
+  if (foliageId === 'MANGROVE_PROPAGULE') {
+    const v = foliageSupportsPropaguleModel(foliageId) ? activePropaguleModel : 'ground';
+    const modelName = propaguleModelToBlockModelName(v);
+    // Use a variant-specific material key so the correct texture is loaded.
+    const pmats = ensurePropaguleMats(v);
+    return makeAsyncMinecraftModelMesh(modelName, pmats.placement);
+  }
+
+  // Sunflower uses a custom top model (flower head) rather than a second crossed-stalk.
+  if (foliageId === 'SUNFLOWER') {
+    return makeSunflowerDoubleMesh(mats.placementBottom, mats.placementTop);
+  }
+
   if (mats.model === 'double') {
     return makeTallGrassMesh(mats.placementBottom, mats.placementTop);
   }
   return makeGrassMesh(mats.placement);
+}
+
+function makeSunflowerDoubleMesh(bottomMat, topMat){
+  const root = new THREE.Group();
+
+  const bottom = makeGrassMesh(bottomMat);
+  bottom.position.set(0, 0, 0);
+  bottom.userData.__tallPart = 'bottom';
+  bottom.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'bottom'; });
+
+  // Top: render the vanilla sunflower_top block model (uses sunflower_top/front/back textures).
+  const top = makeAsyncMinecraftModelMesh('sunflower_top', topMat, { perFaceMaterials: true });
+  top.position.set(0, 1, 0);
+  top.userData.__tallPart = 'top';
+  top.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'top'; });
+
+  root.add(bottom);
+  root.add(top);
+
+  // Tag meshes for raycasting.
+  root.traverse(obj => {
+    if (obj.isMesh) obj.userData.__isGrassPart = true;
+  });
+
+  return root;
 }
 
 
@@ -1638,6 +2215,11 @@ function grassLabel(g){
     if (g.kind === 'POINTED_DRIPSTONE' && g.variant.dir) extra += ` ${g.variant.dir}`;
   }
 
+  if (g.kind === 'MANGROVE_PROPAGULE') {
+    const v = String(g.propaguleModel || 'ground');
+    extra += ` ${v.replace('_', ' ')}`;
+  }
+
   return `#${g.id}  ${name}${extra}  block(${b.x},${b.y},${b.z})  off(${o.x},${o.y},${o.z})`;
 }
 
@@ -1662,7 +2244,27 @@ function setSelected(id){
   for (const g of grasses.values()) {
     const isSel = g.id === id;
 
-    const mats = ensureFoliageMats(g.kind);
+    // Some foliage uses multiple materials (per-face or per-segment) that must be preserved.
+    // If we replace materials wholesale, we'd lose the correct texture mapping.
+    // - Sunflower top uses the sunflower_top block model with multiple textures.
+    // - Pointed dripstone stacks have one material per segment (base/middle/frustum/tip).
+    // For these, just tint the existing materials to indicate selection.
+    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE') {
+      const tintHex = isSel ? 0xdb8484 : 0xdddddd;
+      g.mesh.traverse(obj => {
+        if (obj.isMesh && obj.material && obj.material.color) {
+          obj.material.color.setHex(tintHex);
+          // Keep selection readable through other transparent foliage.
+          obj.material.depthTest = true;
+          obj.material.depthWrite = true;
+        }
+      });
+      continue;
+    }
+
+    const mats = (g.kind === 'MANGROVE_PROPAGULE')
+      ? ensurePropaguleMats(g.propaguleModel ?? activePropaguleModel)
+      : ensureFoliageMats(g.kind);
     const model = mats.model;
     if (model === 'double') {
       g.mesh.traverse(obj => {
@@ -1678,11 +2280,22 @@ function setSelected(id){
     }
   }
 
-  // sync UI
-// sync UI
+	// sync UI
   if (id == null) return;
-  const g = grasses.get(id);
-  if (!g) return;
+	const g = grasses.get(id);
+	if (!g) return;
+
+	// Mangrove propagule: show the variant dropdown while selected, and mirror its current variant.
+	if (g.kind === 'MANGROVE_PROPAGULE') {
+		activePropaguleModel = String(g.propaguleModel || activePropaguleModel || 'ground');
+		if (el.propaguleControls) el.propaguleControls.classList.remove('hidden');
+		if (el.propaguleModel) el.propaguleModel.value = activePropaguleModel;
+	} else {
+		// Only show the dropdown in placement mode for propagules.
+		if (!foliageSupportsPropaguleModel(activeFoliageId) && el.propaguleControls) {
+			el.propaguleControls.classList.add('hidden');
+		}
+	}
 
   // Selected grass block position (separate from "active block")
   el.selBlockX.value = String(g.block.x);
@@ -1725,7 +2338,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   const kind = FOLIAGE.byId.has(foliageId) ? foliageId : 'SHORT_GRASS';
   const def = FOLIAGE.byId.get(kind);
   const model = def?.model ?? 'single';
-  const mats = ensureFoliageMats(kind);
+  const mats = (kind === 'MANGROVE_PROPAGULE') ? null : ensureFoliageMats(kind);
 
   // Enforce vanilla semantics: XZ-only foliage has no Y offset.
   // We store y=15 so offsetToVec3 maps to y=0.
@@ -1738,6 +2351,13 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
     mesh = makeBambooStackMesh(mats.base, variant?.height ?? 1);
   } else if (kind === 'POINTED_DRIPSTONE') {
     mesh = makeDripstoneStackMesh(mats.base, variant?.height ?? 1, variant?.dir ?? 'up');
+  } else if (kind === 'MANGROVE_PROPAGULE') {
+    const pmats = ensurePropaguleMats(activePropaguleModel);
+    const modelName = propaguleModelToBlockModelName(activePropaguleModel);
+    mesh = makeAsyncMinecraftModelMesh(modelName, pmats.base);
+  } else if (kind === 'SUNFLOWER') {
+    // Sunflower top is not a second stalk cross; it uses sunflower_top.json with multiple textures.
+    mesh = makeSunflowerDoubleMesh(mats.baseBottom, mats.baseTop);
   } else {
     mesh = (model === 'double')
       ? makeTallGrassMesh(mats.baseBottom, mats.baseTop)
@@ -1748,6 +2368,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   grassGroup.add(mesh);
 
   const g = { id, kind, block: block.clone(), off: { ...fixedOff }, mesh, variant: getActiveVariantFor(kind) };
+  if (kind === 'MANGROVE_PROPAGULE') g.propaguleModel = String(activePropaguleModel || 'ground');
   grasses.set(id, g);
 
   // Ensure correct materials if this is the first selection.
@@ -1862,7 +2483,8 @@ el.exportOffsets.addEventListener('click', () => {
     const o = g.off;
     const oy = isYOffsetLocked(g.kind) ? 15 : o.y;
     // Always include foliage id so the cracker can apply the correct axis mask.
-    return `${b.x} ${b.y} ${b.z}  ${o.x} ${oy} ${o.z} ${g.kind}`;
+    const extra = (g.kind === 'MANGROVE_PROPAGULE' && g.propaguleModel) ? ` ${g.propaguleModel}` : '';
+    return `${b.x} ${b.y} ${b.z}  ${o.x} ${oy} ${o.z} ${g.kind}${extra}`;
   });
   el.exportBox.value = lines.join('\n');
   el.exportBox.focus();
@@ -1883,12 +2505,13 @@ function parseGrassDataStrict(text){
     //   blockX blockY blockZ  offX offY offZ   [kind]
     // kind is optional. Supported tokens include the foliage ids (e.g. TALL_GRASS, DANDELION),
     // plus legacy aliases: short / tall.
-    const m = raw.match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?(?:\s+.*)?$/);
+    const m = raw.match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?(?:\s+([A-Za-z0-9_]+))?(?:\s+.*)?$/);
     if (!m) throw new Error(`Invalid format on line ${i+1}. Expected: blockX blockY blockZ offX offY offZ`);
 
     const bx = parseInt(m[1],10), by = parseInt(m[2],10), bz = parseInt(m[3],10);
     const ox = parseInt(m[4],10), oy = parseInt(m[5],10), oz = parseInt(m[6],10);
     let kind = (m[7] ? String(m[7]).trim() : 'SHORT_GRASS');
+    const variantToken = m[8] ? String(m[8]).trim() : '';
     // Legacy aliases
     if (/^short$/i.test(kind)) kind = 'SHORT_GRASS';
     if (/^tall$/i.test(kind)) kind = 'TALL_GRASS';
@@ -1901,7 +2524,9 @@ function parseGrassDataStrict(text){
       throw new Error(`Offsets must be 0â€“15 on line ${i+1}. Got: ${ox} ${oy} ${oz}`);
     }
 
-    rows.push({bx,by,bz,ox,oy,oz,kind});
+    const row = {bx,by,bz,ox,oy,oz,kind};
+    if (kind === 'MANGROVE_PROPAGULE' && variantToken) row.propaguleModel = variantToken;
+    rows.push(row);
   }
   if (!rows.length) throw new Error('No grass data found.');
   return rows;
@@ -1912,7 +2537,12 @@ el.loadGrassData.addEventListener('click', () => {
     el.exportBox.value = '';
     clearAllGrass();
     for (const r of rows){
+      const prevProp = activePropaguleModel;
+      if (r.kind === 'MANGROVE_PROPAGULE') {
+        activePropaguleModel = String(r.propaguleModel || 'ground');
+      }
       addGrass(new THREE.Vector3(r.bx, r.by, r.bz), {x:r.ox, y:r.oy, z:r.oz}, r.kind);
+      activePropaguleModel = prevProp;
     }
     // select first grass and set active block
     const first = [...grasses.values()].sort((a,b)=>a.id-b.id)[0];
@@ -2048,10 +2678,17 @@ const GF = (() => {
 
   function packedGrassOffset(x, y, z, version){
     const yy = (version === 'post1_12') ? 0 : (y | 0);
-    const s = (Math.imul(x | 0, X_MULT) ^ Math.imul(z | 0, Z_MULT) ^ yy) | 0;
-    // low32(l) = (s*s*LCG_MULT + s*LCG_ADDEND) mod 2^32
-    const lo = (Math.imul(Math.imul(s, s), LCG_MULT) + Math.imul(s, LCG_ADDEND)) | 0;
-    return ((lo >>> 16) & 0xFFF) >>> 0; // packed (ox | oy<<4 | oz<<8)
+
+    // Java (BlockState.getOffset / AbstractBlock.getOffset):
+    //   long l = (x*3129871L) ^ (z*116129781L) ^ y;
+    //   l = l*l*42317861L + l*11L;
+    let l = (BigInt(x | 0) * BigInt(X_MULT)) ^ (BigInt(z | 0) * BigInt(Z_MULT)) ^ BigInt(yy);
+    l = BigInt.asIntN(64, l);
+    l = BigInt.asIntN(64, (l * l * BigInt(LCG_MULT)) + (l * BigInt(LCG_ADDEND)));
+    const u = BigInt.asUintN(64, l);
+
+    // Bits 16..27 contain three 4-bit nibbles (ox | oy<<4 | oz<<8).
+    return Number((u >> 16n) & 0xFFFn) >>> 0;
   }
 
   // --- Pointed dripstone equivalence handling ---
@@ -2144,10 +2781,17 @@ const GF = (() => {
 
       function packedGrassOffset(x, y, z, version){
         const yy = (version === 'post1_12') ? 0 : (y | 0);
-        const s = (Math.imul(x | 0, X_MULT) ^ Math.imul(z | 0, Z_MULT) ^ yy) | 0;
-        // low32(l) = (s*s*LCG_MULT + s*LCG_ADDEND) mod 2^32
-        const lo = (Math.imul(Math.imul(s, s), LCG_MULT) + Math.imul(s, LCG_ADDEND)) | 0;
-        return ((lo >>> 16) & 0xFFF) >>> 0;
+
+        // Java (BlockState.getOffset / AbstractBlock.getOffset):
+        //   long l = (x*3129871L) ^ (z*116129781L) ^ y;
+        //   l = l*l*42317861L + l*11L;
+        let l = (BigInt(x | 0) * BigInt(X_MULT)) ^ (BigInt(z | 0) * BigInt(Z_MULT)) ^ BigInt(yy);
+        l = BigInt.asIntN(64, l);
+        l = BigInt.asIntN(64, (l * l * BigInt(LCG_MULT)) + (l * BigInt(LCG_ADDEND)));
+        const u = BigInt.asUintN(64, l);
+
+        // Bits 16..27 contain three 4-bit nibbles (ox | oy<<4 | oz<<8).
+        return Number((u >> 16n) & 0xFFFn) >>> 0;
       }
 
       // Score a predicted packed offset against an expected packed offset.
@@ -2591,7 +3235,9 @@ function ensurePlacementOffsetRules(){
 function ensurePlacementPreview(){
   const previewKey = foliageSupportsHeight(activeFoliageId)
     ? `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}`
-    : activeFoliageId;
+    : (activeFoliageId === 'MANGROVE_PROPAGULE'
+        ? `${activeFoliageId}|${activePropaguleModel}`
+        : activeFoliageId);
   if (placementPreview && placementPreview.userData.__previewKey === previewKey) return;
 
   if (placementPreview) {
