@@ -284,7 +284,7 @@ code{
 }
 .swatch.grid{ background: #cfcfcf; }
 .swatch.chunk{ background: var(--accent2); }
-.swatch.sel{ background: #eaeaea; }
+.swatch.sel{ background: #cc3333; }
 
 .workspace__hint{
   color: rgba(255,255,255,0.55);
@@ -330,6 +330,29 @@ code{
 }
 .repos a:hover{ background: rgba(143,227,255,0.10); }
 
+/* Bottom-right credit / GitHub link */
+.gpt-credit{
+  position: fixed;
+  right: 12px;
+  bottom: 64px; /* sit above the repo footer */
+  z-index: 40;
+  max-width: min(640px, calc(100vw - 24px));
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.25;
+  color: rgba(255,255,255,0.86);
+  text-decoration: none;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+.gpt-credit:hover{
+  color: rgba(255,255,255,0.95);
+  border-color: rgba(143,227,255,0.25);
+  background: rgba(143,227,255,0.08);
+}
+
 /* Scrollbar styling (webkit) */
 .sidebar::-webkit-scrollbar{ width: 10px; }
 .sidebar::-webkit-scrollbar-thumb{
@@ -354,6 +377,34 @@ code{
 }
 
 .hidden{ display: none; }
+
+.foliage-picker{
+  position:absolute;
+  left:10px;
+  top:10px;
+  z-index:6;
+  padding:8px 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius:12px;
+  background:rgba(0,0,0,0.55);
+  color:#fff;
+  user-select:none;
+}
+
+.foliage-picker label{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.foliage-picker select{
+  font-size:12px;
+  padding:4px 6px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(25,25,25,0.85);
+  color:#fff;
+}
 
 .tex-indicator{
   position:absolute;
@@ -399,4 +450,31 @@ footer.disclaimer{
   border-top: 1px solid rgba(255,255,255,0.08);
   background: rgba(0,0,0,0.25);
   text-align: center;
+}
+
+
+.variant-controls{
+  margin-top:8px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:12px;
+}
+.variant-controls.hidden{ display:none; }
+.variant-controls input{
+  width:64px;
+  font-size:12px;
+  padding:4px 6px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(25,25,25,0.85);
+  color:#fff;
+}
+.variant-controls select{
+  font-size:12px;
+  padding:4px 6px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(25,25,25,0.85);
+  color:#fff;
 }

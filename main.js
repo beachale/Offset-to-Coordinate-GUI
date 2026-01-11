@@ -1,13 +1,22 @@
+﻿const foliageMatCache = new Map();
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
-// --- Embedded assets (baked into JS) ---
-// Grass textures: user can switch between these with keyboard 1 / 2.
-const GRASS_JAPPA_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IB2cksfwAAAARnQU1BAACxjwv8YQUAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB+oBCRYaEmBcoC8AAAF1SURBVDjLzVG/a8JAFP4upLQnhYoORSEEl2z+IVmzumRxziSOJaN0cs7ikrVr/pAOhSyhtChSKgmtd2oi10FeSDQ495a7992978c74N+t8cJSTedJNGzEr5JUm+h83qw1NbYfb2uEjm+odL1H012j7XO1a440AAjcmBHw+fYDUiN1UiV8Eg3Vs/3KLiIAQDRbMQAYzQcqcGPG23p59/0uL9zXCOxpTwGAyHK0Hm5gT3tKpgWW8S8m0VBJUdScAIBG+dL1Hp3+HQCgb90jcGMGAF2TI/QSVrUfuDEjsdIBqRKZPe0piuP4hhJZjmi2YlX18cJSGj0IvYQRKLIcVWIAJbnIcowXlopmKyayHGw0H6jQS5jjG4q3dWyWO3T6d7Wdt3R0TQ6R5ZBpARqsTItThNF8oAigxVt6udPwNssdqu9enj6YFnoJk2kBKQp0TY7D9giqyfZheyyjdE1ekji+oTRSP2yPtf89r2ValFj2dRqkFAX+AB5A7cGa6YC2AAAAAElFTkSuQmCC';
-const GRASS_PROGRAMMER_ART_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IB2cksfwAAAARnQU1BAACxjwv8YQUAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB+oBCRYZNJl8dhEAAAHuSURBVDjLjZPNTxNRFMV/bzr0C7CmFpuh2ipCcGPiv9G1ykYX6opoIhvShXs1uNOV0Y0aSFy451+RIMVS20ptK8JMv5nrYtqZjoyJb/OSl3vPPfec8yDg3H9zTfjPowU9pnLxwOJ7rxf+Dby+fUOCGIzfg5rzBUNcBvWiRb5guEV3X10VgEapDUDze8fHYgysTU6ey8Vc9FalG7jC5pOiAqjtmCQzUbRGqU2+YMjHx0UlI6jOydBtMlsD8gVDjKVp9LDyJocUW2v7SvMJNgKwh9661tGA5HyU2q7F+9U9dcaFRqlNeiFOvmCICO6duBjh9vOsACjN6zv8agHQKDuaaJOoIt5kpcHnpwfq3FyYkK7IXJ9x3Xn4blEuXIp5ORj0bAC21vbVmLYWUtx5kZXjn30+PNpTlS8mh8U2IlDbtbBPZSJIfzm8/bKmWpUumu5f+Xw6gthO8RhAB2hVu8wvz5yxTZ/yB9U+FRhhflr/pnxRru6YPHi7KAArGznHqhGD1c1lcTSCox89Updj/r+Qysa4cjNBaEq5Ao69TmainrBqLDbceuY4pAMc1/uYzQFda4ixNM2vag+AYd+mWfYS+bveR2nQOOgQm9WdISsbOUmkw64ozXKXzskQscFsDlCac4ejISLxEACxWd1N6x8MBNqEjfDNWwAAAABJRU5ErkJggg==';
+// --- Minecraft block textures ---
+// We load foliage textures directly from the Minecraft assets repo you linked.
+// (This keeps the zip tiny while still supporting many foliage types.)
+const MC_ASSETS_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-1/assets/minecraft/textures/block/';
+
+// Some vanilla foliage textures are grayscale and are normally tinted by the game.
+// This tool doesn't simulate biome tinting, so we apply a fixed color overlay for
+// those specific grayscale textures.
+const GRAYSCALE_FOLIAGE_OVERLAY_HEX = 0xb3ff06; // #b3ff06
+function isGrayscaleFoliage(id){
+  return id === 'SHORT_GRASS' || id === 'TALL_GRASS' || id === 'FERN' || id === 'LARGE_FERN';
+}
 const TINTED_CROSS_MODEL = {"ambientocclusion":false,"textures":{"particle":"#cross"},"elements":[{"from":[0.8,0,8],"to":[15.2,16,8],"rotation":{"origin":[8,8,8],"axis":"y","angle":45,"rescale":true},"shade":false,"faces":{"north":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0},"south":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0}}},{"from":[8,0,0.8],"to":[8,16,15.2],"rotation":{"origin":[8,8,8],"axis":"y","angle":45,"rescale":true},"shade":false,"faces":{"west":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0},"east":{"uv":[0,0,16,16],"texture":"#cross","tintindex":0}}}]};
 
 // --- Viewport vs workspace ---
-// The on-page viewport is a fixed 960×540 canvas.
+// The on-page viewport is a fixed 960Ã—540 canvas.
 // Inside that viewport, we display a (potentially huge) workspace coordinate space.
 // You can pan/zoom the workspace, and independently choose the render resolution
 // of the Three.js scene inside that workspace.
@@ -60,14 +69,32 @@ function wrap(v, a, b){
 const MC_MAX_HORIZ_OFF = 0.25;
 const MC_MAX_VERT_OFF  = 0.2;
 
-function offsetToVec3(offX, offY, offZ) {
-  const xRaw = ((offX / 15) - 0.5) * 0.5;
-  const zRaw = ((offZ / 15) - 0.5) * 0.5;
+// Pointed dripstone uses a smaller maximum horizontal offset than the default foliage grid.
+// Vanilla (1.21.x): PointedDripstoneBlock.getMaxHorizontalOffset() = 0.125 (1/8).
+function getMaxHorizontalOffsetForKind(kind){
+  return (String(kind || '') === 'POINTED_DRIPSTONE') ? 0.125 : MC_MAX_HORIZ_OFF;
+}
+
+// Convert the 0..15 per-axis offset integers into Minecraft's baked-model translation.
+// Most foliage uses +/-0.25 horizontal, but pointed dripstone uses +/-0.125.
+function offsetToVec3ForKind(kind, offX, offY, offZ) {
+  const maxH = getMaxHorizontalOffsetForKind(kind);
+
+  // IMPORTANT (vanilla parity):
+  // Offsets are *picked* on the default foliage lattice (±0.25, 16 steps; step = 1/30),
+  // then Minecraft clamps X/Z to ±getMaxHorizontalOffset(). For pointed dripstone this
+  // produces duplicated edge values (10 unique per axis -> 100 unique XZ positions).
+  // So we must compute raw X/Z using the default span, not the clamped span.
+  const spanHRaw = 2 * MC_MAX_HORIZ_OFF; // 0.5
+
+  // 0..15 -> [-0.25, +0.25] inclusive (raw lattice)
+  const xRaw = ((offX / 15) - 0.5) * spanHRaw;
+  const zRaw = ((offZ / 15) - 0.5) * spanHRaw;
   const yRaw = ((offY / 15) - 1.0) * MC_MAX_VERT_OFF;
 
   // Minecraft clamps X/Z to +/- getMaxHorizontalOffset().
-  const x = clamp(xRaw, -MC_MAX_HORIZ_OFF, MC_MAX_HORIZ_OFF);
-  const z = clamp(zRaw, -MC_MAX_HORIZ_OFF, MC_MAX_HORIZ_OFF);
+  const x = clamp(xRaw, -maxH, maxH);
+  const z = clamp(zRaw, -maxH, maxH);
   return new THREE.Vector3(x, yRaw, z);
 }
 
@@ -76,6 +103,17 @@ const viewCanvas = document.getElementById('view');
 viewCanvas.width = 960;
 viewCanvas.height = 540;
 const viewCtx = viewCanvas.getContext('2d');
+
+// UX: if the user is typing in a sidebar input, clicking the canvas should exit typing mode
+// so keyboard shortcuts (WASD, 1/2, etc.) work immediately.
+viewCanvas.addEventListener('pointerdown', () => {
+  const ae = document.activeElement;
+  if (!ae) return;
+  const tag = (ae.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+    ae.blur();
+  }
+});
 
 const webglCanvas = document.createElement('canvas');
 // preserveDrawingBuffer allows drawImage(webglCanvas, ...) reliably.
@@ -159,7 +197,7 @@ let helperKey = '';
 
 function getGridRadiusBlocks() {
   // Slider is the source of truth; default keeps prior behavior-ish.
-  const r = Math.floor(num(el.gridRadius?.value, 24));
+  const r = Math.floor(num(el.gridRadius?.value, 4));
   return clamp(r, 2, 64);
 }
 
@@ -257,6 +295,7 @@ const el = {
   pitch: document.getElementById('pitch'),
   fov: document.getElementById('fov'),
   oldCamNudge: document.getElementById('oldCamNudge'),
+  reallyOldCamNudge: document.getElementById('reallyOldCamNudge'),
   readout: document.getElementById('readout'),
 
   viewW: document.getElementById('viewW'),
@@ -268,6 +307,7 @@ const el = {
 
   overlayFile: document.getElementById('overlayFile'),
   overlayOpacity: document.getElementById('overlayOpacity'),
+  grassOpacity: document.getElementById('grassOpacity'),
   showOverlay: document.getElementById('showOverlay'),
   showGrid: document.getElementById('showGrid'),
   gridRadius: document.getElementById('gridRadius'),
@@ -277,6 +317,9 @@ const el = {
   offX: document.getElementById('offX'),
   offY: document.getElementById('offY'),
   offZ: document.getElementById('offZ'),
+  offXRange: document.getElementById('offXRange'),
+  offZRange: document.getElementById('offZRange'),
+  dripstoneOffsetNote: document.getElementById('dripstoneOffsetNote'),
   applyOffsets: document.getElementById('applyOffsets'),
   centerOffsets: document.getElementById('centerOffsets'),
 
@@ -286,6 +329,13 @@ const el = {
   applySelBlock: document.getElementById('applySelBlock'),
 
   grassList: document.getElementById('grassList'),
+  foliageSelect: document.getElementById('foliageSelect'),
+  bambooUvControls: document.getElementById('bambooUvControls'),
+  bambooUvU: document.getElementById('bambooUvU'),
+  bambooUvV: document.getElementById('bambooUvV'),
+  variantControls: document.getElementById('variantControls'),
+  variantHeight: document.getElementById('variantHeight'),
+  variantDir: document.getElementById('variantDir'),
   exportOffsets: document.getElementById('exportOffsets'),
   exportBox: document.getElementById('exportBox'),
   grassDataIn: document.getElementById('grassDataIn'),
@@ -398,14 +448,45 @@ let overlayImage = null; // HTMLImageElement
 let overlayOpacity = 0.65;
 let overlayVisible = true;
 
+// Grass overlay opacity (applies to the in-viewport grass planes)
+let grassOpacity = 1.0;
+
+// Materials are created later (after textures load). We declare handles here so
+// we can safely update opacity from UI event handlers.
+// (Historical) this tool started with a single grass material.
+// Now we cache per-foliage materials in ensureFoliageMats().
+
 function syncOverlayUI(){
   overlayOpacity = clamp(num(el.overlayOpacity?.value, 0.65), 0, 1);
   overlayVisible = Boolean(el.showOverlay?.checked);
 }
 
+function syncGrassOpacityUI(){
+  grassOpacity = clamp(num(el.grassOpacity?.value, 1.0), 0, 1);
+  // Apply to all cached materials.
+  for (const mats of foliageMatCache?.values?.() ?? []) {
+    if (mats.model === 'double') {
+      for (const m of [mats.baseBottom, mats.baseTop, mats.selectedBottom, mats.selectedTop]) {
+        if (m) { m.opacity = grassOpacity; m.transparent = (grassOpacity < 1); }
+      }
+      for (const m of [mats.placementBottom, mats.placementTop]) {
+        if (m) { m.opacity = clamp(grassOpacity * 0.65, 0, 1); m.transparent = true; }
+      }
+    } else {
+      for (const m of [mats.base, mats.selected]) {
+        if (m) { m.opacity = grassOpacity; m.transparent = (grassOpacity < 1); }
+      }
+      if (mats.placement) {
+        mats.placement.opacity = clamp(grassOpacity * 0.65, 0, 1);
+        mats.placement.transparent = true;
+      }
+    }
+  }
+}
+
 function syncGridRadiusUI(){
   if (!el.gridRadiusLabel || !el.gridRadius) return;
-  el.gridRadiusLabel.textContent = String(Math.floor(num(el.gridRadius.value, 24)));
+  el.gridRadiusLabel.textContent = String(Math.floor(num(el.gridRadius.value, 4)));
 }
 
 function syncGridUI(){
@@ -436,6 +517,7 @@ function syncVisibilityUI(){
 }
 
 el.overlayOpacity.addEventListener('input', syncOverlayUI);
+el.grassOpacity?.addEventListener('input', syncGrassOpacityUI);
 el.showOverlay.addEventListener('change', syncOverlayUI);
 el.gridRadius?.addEventListener('input', () => {
   syncGridRadiusUI();
@@ -456,7 +538,18 @@ el.overlayFile.addEventListener('change', (e) => {
   const img = new Image();
   img.onload = () => {
     overlayImage = img;
+    // Auto-match workspace + render resolution to the loaded image.
+    const iw = overlayImage?.naturalWidth ?? 0;
+    const ih = overlayImage?.naturalHeight ?? 0;
+    if (iw > 0 && ih > 0) {
+      if (el.viewW) el.viewW.value = String(iw);
+      if (el.viewH) el.viewH.value = String(ih);
+      if (el.renderW) el.renderW.value = String(iw);
+      if (el.renderH) el.renderH.value = String(ih);
+      applyWorkspaceAndRenderSize(iw, ih, iw, ih);
+    }
     syncOverlayUI();
+    URL.revokeObjectURL(url);
   };
   img.src = url;
 });
@@ -512,8 +605,9 @@ el.sizeToOverlay?.addEventListener('click', () => {
 // Initial sync
 applyWorkspaceAndRenderSize(VIEW_W, VIEW_H, RENDER_W, RENDER_H);
 syncOverlayUI();
+syncGrassOpacityUI();
 
-// --- Pan/zoom inside the fixed 960×540 viewport canvas ---
+// --- Pan/zoom inside the fixed 960Ã—540 viewport canvas ---
 let leftDown = false;
 let leftDownClientX = 0;
 let leftDownClientY = 0;
@@ -594,7 +688,8 @@ function updateCameraFromUI(){
 
   const forward = mcForwardFromYawPitch(yaw, pitch);
   const useOldNudge = Boolean(el.oldCamNudge?.checked);
-  const nudge = useOldNudge ? 0.05 : 0.0;
+  const useReallyOldNudge = Boolean(el.reallyOldCamNudge?.checked);
+  const nudge = useReallyOldNudge ? -0.10 : (useOldNudge ? 0.05 : 0.0);
 
   // Old Minecraft (e.g. 1.11) first-person rendering nudges the view forward by +0.05 in view direction.
   // Emulate that here when requested so overlays match older screenshots.
@@ -608,17 +703,17 @@ function updateCameraFromUI(){
 `Minecraft-style camera
 pos   = (${x.toFixed(3)}, ${yEye.toFixed(3)}, ${z.toFixed(3)})   [eye]
 feet  = (${x.toFixed(3)}, ${yFeet.toFixed(3)}, ${z.toFixed(3)})
-yaw   = ${yaw.toFixed(3)}°   (0=+Z/south, -90=+X/east)
-pitch = ${pitch.toFixed(3)}° (+=down, -=up)
-fov   = ${fov.toFixed(3)}°   (vertical)
+yaw   = ${yaw.toFixed(3)}Â°   (0=+Z/south, -90=+X/east)
+pitch = ${pitch.toFixed(3)}Â° (+=down, -=up)
+fov   = ${fov.toFixed(3)}Â°   (vertical)
 old nudge = ${useOldNudge ? '+0.05' : 'off'}`;
   } else {
     el.readout.textContent =
 `Minecraft-style camera
 pos   = (${x.toFixed(3)}, ${yEye.toFixed(3)}, ${z.toFixed(3)})   [blocks]
-yaw   = ${yaw.toFixed(3)}°   (0=+Z/south, -90=+X/east)
-pitch = ${pitch.toFixed(3)}° (+=down, -=up)
-fov   = ${fov.toFixed(3)}°   (vertical)
+yaw   = ${yaw.toFixed(3)}Â°   (0=+Z/south, -90=+X/east)
+pitch = ${pitch.toFixed(3)}Â° (+=down, -=up)
+fov   = ${fov.toFixed(3)}Â°   (vertical)
 old nudge = ${useOldNudge ? '+0.05' : 'off'}`;
   }
 
@@ -639,7 +734,14 @@ for (const k of ['camX','camY','camZ','yaw','pitch','fov']) {
   el[k].addEventListener('input', updateCameraFromUI);
 }
 
-el.oldCamNudge?.addEventListener('change', updateCameraFromUI);
+el.oldCamNudge?.addEventListener('change', () => {
+  if (el.oldCamNudge.checked && el.reallyOldCamNudge) el.reallyOldCamNudge.checked = false;
+  updateCameraFromUI();
+});
+el.reallyOldCamNudge?.addEventListener('change', () => {
+  if (el.reallyOldCamNudge.checked && el.oldCamNudge) el.oldCamNudge.checked = false;
+  updateCameraFromUI();
+});
 
 el.useFeetY?.addEventListener('change', () => {
   // Preserve the *current* perceived value when flipping modes.
@@ -678,67 +780,564 @@ el.showGrass.addEventListener('change', syncGrassUI);
 syncGrassUI();
 
 // Shared materials/geometry
-// Two textures (same model + same 0–15 offsets). Switch with keyboard:
+// Two textures (same model + same 0â€“15 offsets). Switch with keyboard:
 //   1 = Jappa (modern)
 //   2 = Programmer Art
 const texIndicatorEl = document.getElementById('texIndicator');
 
 const texLoader = new THREE.TextureLoader();
-const textureJappa = await texLoader.loadAsync(GRASS_JAPPA_PNG_DATA_URL);
-const textureProg  = await texLoader.loadAsync(GRASS_PROGRAMMER_ART_PNG_DATA_URL);
+texLoader.setCrossOrigin('anonymous');
 
-for (const t of [textureJappa, textureProg]) {
+function configureMcTexture(t){
+  if (!t) return;
   t.colorSpace = THREE.SRGBColorSpace;
   t.magFilter = THREE.NearestFilter;
   t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.needsUpdate = true;
 }
 
-let activeGrassTexKey = 'jappa';
+
+
+function fixAnimatedStripTexture(tex){
+  try{
+    const img = tex && tex.image;
+    if (!img || !img.width || !img.height) return;
+    // Animated textures in Minecraft are stored as vertical strips of 16x16 frames.
+    // If we map the whole strip onto a quad it looks like horizontal "scanlines".
+    if (img.width === 16 && img.height > 16 && (img.height % 16) === 0) {
+      const frames = img.height / 16;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1, 1 / frames);
+      // three.js offset origin is bottom-left; pick frame 0 at the top.
+      tex.offset.set(0, 1 - tex.repeat.y);
+      tex.needsUpdate = true;
+    }
+  }catch(_){}
+}
+
+// A tiny placeholder so meshes render immediately while textures stream in.
+function makePlaceholderTexture(){
+  const data = new Uint8Array([255, 255, 255, 255]); // 1x1 white
+  const t = new THREE.DataTexture(data, 1, 1);
+  configureMcTexture(t);
+      fixAnimatedStripTexture(t);
+applyAnimatedStripFix(t);
+  return t;
+}
+
+function applyAnimatedStripFix(tex){
+  try {
+    const img = tex && tex.image;
+    if (!img || !img.width || !img.height) return;
+    if (img.width === 16 && img.height > 16 && (img.height % 16) === 0) {
+      const frames = img.height / 16;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1, 1 / frames);
+      tex.offset.set(0, 1 - tex.repeat.y);
+      tex.needsUpdate = true;
+    }
+  } catch(e){}
+}
+
+const PLACEHOLDER_TEX = makePlaceholderTexture();
+
+// Cache textures by name (e.g. 'fern', 'tall_grass_bottom').
+const textureCache = new Map();
+
+async function getBlockTexture(texName){
+  const key = String(texName || '').trim();
+  if (!key) return PLACEHOLDER_TEX;
+  if (textureCache.has(key)) return textureCache.get(key);
+
+  // Insert placeholder immediately to avoid thundering-herd loads.
+  textureCache.set(key, PLACEHOLDER_TEX);
+  const url = `${MC_ASSETS_BLOCK_TEX_BASE}${encodeURIComponent(key)}.png`;
+
+  try {
+    const t = await texLoader.loadAsync(url);
+    configureMcTexture(t);
+    fixAnimatedStripTexture(t);
+    textureCache.set(key, t);
+    return t;
+  } catch (e) {
+    console.warn('Failed to load texture', key, e);
+    textureCache.set(key, PLACEHOLDER_TEX);
+    return PLACEHOLDER_TEX;
+  }
+}
+
+// --- Foliage catalog ---
+// Each foliage type has:
+//  - id: stable export/import token
+//  - label: UI label
+//  - offsetType: 'XYZ' (x/y/z) or 'XZ' (x/z only; y is unobservable in-game)
+//  - model: 'single' (one-block cross), or 'double' (two-block style preview)
+const FOLIAGE = {
+  groups: [
+    {
+      label: 'grass',
+      items: [
+        { id: 'SHORT_GRASS', label: 'short grass', offsetType: 'XYZ', model: 'single' },
+        { id: 'TALL_GRASS', label: 'tall grass', offsetType: 'XZ', model: 'double' },
+        { id: 'FERN', label: 'fern', offsetType: 'XYZ', model: 'single' },
+        { id: 'LARGE_FERN', label: 'large fern', offsetType: 'XZ', model: 'double' },
+
+        { id: 'SHORT_DRY_GRASS', label: 'short dry grass', offsetType: 'XYZ', model: 'single' },
+        { id: 'TALL_DRY_GRASS', label: 'tall dry grass', offsetType: 'XYZ', model: 'single' },
+
+        { id: 'SMALL_DRIPLEAF', label: 'small dripleaf', offsetType: 'XYZ', model: 'single' },
+
+        { id: 'CRIMSON_ROOTS', label: 'crimson roots', offsetType: 'XZ', model: 'single' },
+        { id: 'WARPED_ROOTS', label: 'warped roots', offsetType: 'XZ', model: 'single' },
+        { id: 'NETHER_SPROUTS', label: 'warped sprouts', offsetType: 'XZ', model: 'single' },
+
+        { id: 'TALL_SEAGRASS', label: 'tall seagrass', offsetType: 'XZ', model: 'double' },
+      ],
+    },
+    {
+      label: 'flowers',
+      items: [
+        { id: 'DANDELION', label: 'dandelion', offsetType: 'XZ', model: 'single' },
+        { id: 'TORCHFLOWER', label: 'torchflower', offsetType: 'XZ', model: 'single' },
+        { id: 'POPPY', label: 'poppy', offsetType: 'XZ', model: 'single' },
+        { id: 'BLUE_ORCHID', label: 'blue orchid', offsetType: 'XZ', model: 'single' },
+        { id: 'ALLIUM', label: 'allium', offsetType: 'XZ', model: 'single' },
+        { id: 'AZURE_BLUET', label: 'azure bluet', offsetType: 'XZ', model: 'single' },
+
+        { id: 'RED_TULIP', label: 'red tulip', offsetType: 'XZ', model: 'single' },
+        { id: 'ORANGE_TULIP', label: 'orange tulip', offsetType: 'XZ', model: 'single' },
+        { id: 'WHITE_TULIP', label: 'white tulip', offsetType: 'XZ', model: 'single' },
+        { id: 'PINK_TULIP', label: 'pink tulip', offsetType: 'XZ', model: 'single' },
+
+        { id: 'OXEYE_DAISY', label: 'oxeye daisy', offsetType: 'XZ', model: 'single' },
+        { id: 'CORNFLOWER', label: 'cornflower', offsetType: 'XZ', model: 'single' },
+        { id: 'WITHER_ROSE', label: 'wither rose', offsetType: 'XZ', model: 'single' },
+        { id: 'LILY_OF_THE_VALLEY', label: 'lily of the valley', offsetType: 'XZ', model: 'single' },
+
+        { id: 'SUNFLOWER', label: 'sunflower', offsetType: 'XZ', model: 'double' },
+        { id: 'LILAC', label: 'lilac', offsetType: 'XZ', model: 'double' },
+        { id: 'ROSE_BUSH', label: 'rose bush', offsetType: 'XZ', model: 'double' },
+        { id: 'PEONY', label: 'peony', offsetType: 'XZ', model: 'double' },
+
+        { id: 'PITCHER_PLANT', label: 'pitcher plant', offsetType: 'XZ', model: 'double' },
+
+        { id: 'OPEN_EYEBLOSSOM', label: 'eyeblossom (open)', offsetType: 'XZ', model: 'single' },
+        { id: 'CLOSED_EYEBLOSSOM', label: 'eyeblossom (closed)', offsetType: 'XZ', model: 'single' },
+      ],
+    },
+    {
+      label: 'misc',
+      items: [
+        { id: 'HANGING_ROOTS', label: 'hanging roots', offsetType: 'XZ', model: 'single' },
+        { id: 'MANGROVE_PROPAGULE', label: 'mangrove propagule', offsetType: 'XZ', model: 'single' },
+        { id: 'BAMBOO_SAPLING', label: 'bamboo sapling', offsetType: 'XZ', model: 'single' },
+        { id: 'BAMBOO', label: 'bamboo', offsetType: 'XZ', model: 'single' },
+        { id: 'POINTED_DRIPSTONE', label: 'pointed dripstone', offsetType: 'XZ', model: 'single' },
+      ],
+    },
+  ],
+  byId: new Map(),
+};
+
+for (const g of FOLIAGE.groups) {
+  for (const it of g.items) FOLIAGE.byId.set(it.id, it);
+}
+
+function foliageMaskFor(offsetType){
+  return (offsetType === 'XZ') ? 0xF0F : 0xFFF;
+}
+
+function isYOffsetLocked(foliageId){
+  const def = FOLIAGE.byId.get(foliageId);
+  return (def?.offsetType === 'XZ');
+}
+
+// Current placement foliage. Defaults to short grass.
+let activeFoliageId = 'SHORT_GRASS';
+
+
+
+/** Bamboo texture UV shift (0..15 pixels). Vanilla bamboo chooses among different UV mappings/models. */
+let bambooUvU = 0; // 0..15
+let bambooUvV = 0; // 0..15
+
+function isBamboo(id){ return String(id || '') === 'BAMBOO'; }
+
+function showHideBambooUvControls(){
+  if (!el.bambooUvControls) return;
+  const show = isBamboo(activeFoliageId);
+  el.bambooUvControls.classList.toggle('hidden', !show);
+}
+
+function clampInt(v, a, b){
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return a;
+  return Math.max(a, Math.min(b, n));
+}
+
+/** Pointed dripstone: vanilla uses the default 16-step foliage grid (±0.25) and then clamps to ±0.125.
+    This collapses indices 0–3 and 12–15 into identical final positions.
+    We expose a 10-step *effective* selector (0..9) to avoid fake precision. */
+const DRIPSTONE_EFF_TO_RAW = [0,4,5,6,7,8,9,10,11,15]; // representatives
+function isPointedDripstone(id){ return String(id || '') === 'POINTED_DRIPSTONE'; }
+function dripstoneRawToEff(i){
+  const n = clampInt(i, 0, 15);
+  if (n <= 3) return 0;
+  if (n >= 12) return 9;
+  return n - 3; // 4..11 -> 1..8
+}
+function dripstoneEffToRaw(j){
+  const e = clampInt(j, 0, 9);
+  return DRIPSTONE_EFF_TO_RAW[e];
+}
+
+function updateOffsetUiMode(){
+  const isDrip = isPointedDripstone(activeFoliageId);
+  if (el.offX) { el.offX.min = '0'; el.offX.max = isDrip ? '9' : '15'; el.offX.step = '1'; }
+  if (el.offZ) { el.offZ.min = '0'; el.offZ.max = isDrip ? '9' : '15'; el.offZ.step = '1'; }
+  if (el.offXRange) el.offXRange.textContent = isDrip ? '0–9' : '0–15';
+  if (el.offZRange) el.offZRange.textContent = isDrip ? '0–9' : '0–15';
+
+  // Heads-up: pointed dripstone edge offsets collapse (0–3 and 12–15 map to the same final offset).
+  const showNote = isDrip;
+  if (el.dripstoneOffsetNote) el.dripstoneOffsetNote.classList.toggle('hidden', !showNote);
+}
+
+
+function applyBambooUvToTexture(tex){
+  if (!tex) return;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1);
+
+  // 1px = 1/16 of a Minecraft texture
+  tex.offset.set((bambooUvU % 16) / 16, (bambooUvV % 16) / 16);
+  tex.needsUpdate = true;
+}
+
+function applyBambooUvToCachedMats(){
+  const mats = foliageMatCache.get('BAMBOO');
+  if (!mats) return;
+
+  for (const m of [mats.base, mats.selected, mats.placement, mats.baseTop, mats.baseBottom, mats.selectedTop, mats.selectedBottom, mats.placementTop, mats.placementBottom]) {
+    if (!m) continue;
+    if (m.map) applyBambooUvToTexture(m.map);
+  }
+}
+
+function syncBambooUvUI(){
+  if (el.bambooUvU) el.bambooUvU.value = String(bambooUvU);
+  if (el.bambooUvV) el.bambooUvV.value = String(bambooUvV);
+  showHideBambooUvControls();
+  updateOffsetUiMode();
+}
+
+// Extra per-foliage variant controls (used by bamboo + pointed dripstone preview)
+// Height controls how many block-units tall the rendered preview/placed mesh appears.
+// This is purely visual; offsets/solver behavior are unchanged.
+let activeVariantHeight = 1;        // 1..16
+let activeVariantDir = 'up';        // 'up' or 'down' (for dripstone)
+
+function foliageSupportsHeight(foliageId){
+  return foliageId === 'BAMBOO' || foliageId === 'POINTED_DRIPSTONE';
+}
+function foliageSupportsDir(foliageId){
+  return foliageId === 'POINTED_DRIPSTONE';
+}
+
+function syncVariantControls(){
+  const box = el.variantControls;
+  if (!box) return;
+  const show = foliageSupportsHeight(activeFoliageId);
+  box.classList.toggle('hidden', !show);
+  if (!show) return;
+
+  // Height
+  const hEl = el.variantHeight;
+  if (hEl) {
+    hEl.min = '1';
+    hEl.max = '16';
+    hEl.value = String(activeVariantHeight);
+  }
+
+  // Direction (dripstone only)
+  const dEl = el.variantDir;
+  if (dEl) {
+    dEl.parentElement?.classList?.toggle('hidden', !foliageSupportsDir(activeFoliageId));
+    dEl.value = activeVariantDir;
+  }
+}
+
+function getActiveVariantFor(foliageId){
+  if (!foliageSupportsHeight(foliageId)) return null;
+  const v = { height: activeVariantHeight|0 };
+  if (foliageId === 'POINTED_DRIPSTONE') v.dir = activeVariantDir;
+  return v;
+}
+
+
+function populateFoliageSelect(){
+  const sel = el.foliageSelect;
+  if (!sel) return;
+  sel.innerHTML = '';
+  for (const grp of FOLIAGE.groups) {
+    const og = document.createElement('optgroup');
+    og.label = grp.label;
+    for (const it of grp.items) {
+      const opt = document.createElement('option');
+      opt.value = it.id;
+      opt.textContent = it.label;
+      og.appendChild(opt);
+    }
+    sel.appendChild(og);
+  }
+  sel.value = activeFoliageId;
+  sel.addEventListener('change', () => {
+    const v = String(sel.value || 'SHORT_GRASS');
+    setPlacementFoliage(v);
+  });
+}
+
+function setPlacementFoliage(id){
+  const next = FOLIAGE.byId.has(id) ? id : 'SHORT_GRASS';
+  activeFoliageId = next;
+  if (el.foliageSelect && el.foliageSelect.value !== next) el.foliageSelect.value = next;
+  syncGrassTextureIndicator();
+  syncVariantControls();
+
+    showHideBambooUvControls();
+// If we are in placement mode, rebuild preview immediately.
+  if (typeof placementMode !== 'undefined' && placementMode) {
+    ensurePlacementOffsetRules();
+    ensurePlacementPreview();
+    const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
+    placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
+  }
+}
+
+populateFoliageSelect();
+
+
+showHideBambooUvControls();
+syncBambooUvUI();
+
+updateOffsetUiMode();
+
+el.bambooUvU?.addEventListener('input', () => {
+  bambooUvU = clampInt(el.bambooUvU.value, 0, 15);
+  applyBambooUvToCachedMats();
+  if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
+});
+
+el.bambooUvV?.addEventListener('input', () => {
+  bambooUvV = clampInt(el.bambooUvV.value, 0, 15);
+  applyBambooUvToCachedMats();
+  if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
+});
+
+// Variant controls wiring
+syncVariantControls();
+el.variantHeight?.addEventListener('input', () => {
+  activeVariantHeight = Math.max(1, Math.min(16, Math.trunc(num(el.variantHeight.value, activeVariantHeight))));
+  if (typeof placementMode !== 'undefined' && placementMode) {
+    ensurePlacementPreview();
+  }
+});
+el.variantHeight?.addEventListener('change', () => {
+  activeVariantHeight = Math.max(1, Math.min(16, Math.trunc(num(el.variantHeight.value, activeVariantHeight))));
+  if (typeof placementMode !== 'undefined' && placementMode) {
+    ensurePlacementPreview();
+  }
+});
+el.variantDir?.addEventListener('change', () => {
+  activeVariantDir = String(el.variantDir.value || 'up');
+  if (typeof placementMode !== 'undefined' && placementMode) {
+    ensurePlacementPreview();
+  }
+});
+
+
 function syncGrassTextureIndicator(){
   if (!texIndicatorEl) return;
-  texIndicatorEl.textContent = (activeGrassTexKey === 'jappa')
-    ? 'Grass texture: Jappa'
-    : 'Grass texture: Programmer Art';
+  const def = FOLIAGE.byId.get(activeFoliageId);
+  const kindLabel = def ? def.label : activeFoliageId;
+  texIndicatorEl.textContent = `Mode: ${kindLabel}`;
 }
 
-function setGrassTexture(key) {
-  const next = (key === 'prog' || key === 'programmer') ? 'prog' : 'jappa';
-  activeGrassTexKey = next;
+// --- Foliage textures + materials ---
+// We support both "single" (one-block) and "double" (two-block tall) foliage.
+// For the tall ones, we use the vanilla _bottom/_top texture names (same as the model json).
 
-  const map = (activeGrassTexKey === 'jappa') ? textureJappa : textureProg;
-  baseMat.map = map;
-  selectedMat.map = map;
-  placementMat.map = map;
-  baseMat.needsUpdate = true;
-  selectedMat.needsUpdate = true;
-  placementMat.needsUpdate = true;
+function texNamesForFoliage(id){
+  switch (id) {
+    // XYZ
+    case 'SHORT_GRASS': return { single: 'short_grass' };
+    case 'FERN': return { single: 'fern' };
+    case 'SHORT_DRY_GRASS': return { single: 'short_dry_grass' };
+    case 'TALL_DRY_GRASS': return { single: 'tall_dry_grass' };
+    case 'SMALL_DRIPLEAF': return { single: 'small_dripleaf' };
 
-  syncGrassTextureIndicator();
+    // XZ (double-height)
+    case 'TALL_GRASS': return { bottom: 'tall_grass_bottom', top: 'tall_grass_top' };
+    case 'LARGE_FERN': return { bottom: 'large_fern_bottom', top: 'large_fern_top' };
+    case 'SUNFLOWER': return { bottom: 'sunflower_bottom', top: 'sunflower_top' };
+    case 'LILAC': return { bottom: 'lilac_bottom', top: 'lilac_top' };
+    case 'ROSE_BUSH': return { bottom: 'rose_bush_bottom', top: 'rose_bush_top' };
+    case 'PEONY': return { bottom: 'peony_bottom', top: 'peony_top' };
+    case 'PITCHER_PLANT': return { bottom: 'pitcher_plant_bottom', top: 'pitcher_plant_top' };
+    case 'TALL_SEAGRASS': return { bottom: 'tall_seagrass_bottom', top: 'tall_seagrass_top' };
+
+    // XZ (single)
+    case 'CRIMSON_ROOTS': return { single: 'crimson_roots' };
+    case 'WARPED_ROOTS': return { single: 'warped_roots' };
+    case 'NETHER_SPROUTS': return { single: 'nether_sprouts' };
+    case 'HANGING_ROOTS': return { single: 'hanging_roots' };
+    case 'MANGROVE_PROPAGULE': return { single: 'mangrove_propagule' };
+    case 'BAMBOO_SAPLING': return { single: 'bamboo_sapling' };
+    case 'BAMBOO':
+      // Bamboo is a multi-model block in-game; as a simple preview, use the stalk texture.
+      return { single: 'bamboo_stalk' };
+    case 'POINTED_DRIPSTONE': return { single: 'pointed_dripstone_up_tip' };
+
+    // Flowers (XZ)
+    case 'DANDELION': return { single: 'dandelion' };
+    case 'TORCHFLOWER': return { single: 'torchflower' };
+    case 'POPPY': return { single: 'poppy' };
+    case 'BLUE_ORCHID': return { single: 'blue_orchid' };
+    case 'ALLIUM': return { single: 'allium' };
+    case 'AZURE_BLUET': return { single: 'azure_bluet' };
+    case 'RED_TULIP': return { single: 'red_tulip' };
+    case 'ORANGE_TULIP': return { single: 'orange_tulip' };
+    case 'WHITE_TULIP': return { single: 'white_tulip' };
+    case 'PINK_TULIP': return { single: 'pink_tulip' };
+    case 'OXEYE_DAISY': return { single: 'oxeye_daisy' };
+    case 'CORNFLOWER': return { single: 'cornflower' };
+    case 'WITHER_ROSE': return { single: 'wither_rose' };
+    case 'LILY_OF_THE_VALLEY': return { single: 'lily_of_the_valley' };
+
+    case 'OPEN_EYEBLOSSOM': return { single: 'open_eyeblossom' };
+    case 'CLOSED_EYEBLOSSOM': return { single: 'closed_eyeblossom' };
+
+    default: {
+      // Best-effort fallback: lower-case id.
+      return { single: String(id || '').toLowerCase() };
+    }
+  }
+}function makePlantMaterial(mapTex){
+  const m = new THREE.MeshBasicMaterial({
+    map: mapTex,
+    transparent: true,
+    alphaTest: 0.5,
+    // IMPORTANT (Minecraft parity): plants are not mirrored when viewed from the back.
+    // A single DoubleSide plane in WebGL appears mirrored on the backface.
+    // We duplicate planes instead (see makeGrassMesh).
+    side: THREE.FrontSide,
+    depthWrite: true,
+  });
+  return m;
 }
 
-const baseMat = new THREE.MeshBasicMaterial({
-  map: textureJappa,
-  transparent: true,
-  alphaTest: 0.5,
-  // IMPORTANT (Minecraft parity): plants are not mirrored when viewed from the back.
-  // A single DoubleSide plane in WebGL appears mirrored on the backface.
-  // Vanilla achieves the correct look by effectively rendering each quad twice
-  // (one for each side) with consistent UV orientation.
-  side: THREE.FrontSide,
-  depthWrite: true,
-});
-const selectedMat = baseMat.clone();
-// Make selection "slightly brighter" (less tinted) rather than a strong color.
-baseMat.color.setHex(0xdddddd);
-// Slight red tint for selected grass highlight
-selectedMat.color.setHex(0xfff0f0);
+/**
+ * Returns cached materials for a foliage id.
+ * For single: { model:'single', base, selected, placement }
+ * For double: { model:'double', baseBottom, baseTop, selectedBottom, selectedTop, placementBottom, placementTop }
+ */
+function ensureFoliageMats(id){
+  const key = String(id || 'SHORT_GRASS');
+  if (foliageMatCache.has(key)) return foliageMatCache.get(key);
 
-// Placement preview material (light gray)
-const placementMat = baseMat.clone();
-placementMat.color.setHex(0xd6d6d6);
-placementMat.opacity = 0.65;
-placementMat.transparent = true;
-placementMat.depthWrite = false;
+  const def = FOLIAGE.byId.get(key);
+  const model = def?.model ?? 'single';
+  const names = texNamesForFoliage(key);
+  const useOverlayTint = isGrayscaleFoliage(key);
+  const baseTintHex = useOverlayTint ? GRAYSCALE_FOLIAGE_OVERLAY_HEX : 0xdddddd;
+  const placementTintHex = useOverlayTint ? GRAYSCALE_FOLIAGE_OVERLAY_HEX : 0xd6d6d6;
+
+  if (model === 'double') {
+    const baseBottom = makePlantMaterial(PLACEHOLDER_TEX);
+    const baseTop = makePlantMaterial(PLACEHOLDER_TEX);
+    baseBottom.color.setHex(baseTintHex);
+    baseTop.color.setHex(baseTintHex);
+
+    const selectedBottom = baseBottom.clone();
+    const selectedTop = baseTop.clone();
+    selectedBottom.color.setHex(0xdb8484);
+    selectedTop.color.setHex(0xdb8484);
+    selectedBottom.depthTest = true;
+    selectedTop.depthTest = true;
+    selectedBottom.depthWrite = true;
+    selectedTop.depthWrite = true;
+
+    const placementBottom = baseBottom.clone();
+    const placementTop = baseTop.clone();
+    placementBottom.color.setHex(placementTintHex);
+    placementTop.color.setHex(placementTintHex);
+    placementBottom.opacity = clamp(grassOpacity * 0.65, 0, 1);
+    placementTop.opacity = clamp(grassOpacity * 0.65, 0, 1);
+    placementBottom.transparent = true;
+    placementTop.transparent = true;
+    placementBottom.depthWrite = false;
+    placementTop.depthWrite = false;
+
+    const mats = {
+      model: 'double',
+      baseBottom, baseTop,
+      selectedBottom, selectedTop,
+      placementBottom, placementTop,
+      __texBottom: names.bottom ?? names.single,
+      __texTop: names.top ?? names.single,
+    };
+    foliageMatCache.set(key, mats);
+
+    // Async load actual textures + apply to all mats.
+    (async () => {
+      const bt = await getBlockTexture(mats.__texBottom);
+      const tt = await getBlockTexture(mats.__texTop);
+      for (const m of [baseBottom, selectedBottom, placementBottom]) { m.map = bt; m.needsUpdate = true; }
+      for (const m of [baseTop, selectedTop, placementTop]) { m.map = tt; m.needsUpdate = true; }
+    })();
+
+    return mats;
+  }
+
+  // single
+  const base = makePlantMaterial(PLACEHOLDER_TEX);
+  base.color.setHex(baseTintHex);
+  const selected = base.clone();
+  selected.color.setHex(0xdb8484);
+  selected.depthTest = true;
+  selected.depthWrite = true;
+
+  const placement = base.clone();
+  placement.color.setHex(placementTintHex);
+  placement.opacity = clamp(grassOpacity * 0.65, 0, 1);
+  placement.transparent = true;
+  placement.depthWrite = false;
+
+  const mats = { model: 'single', base, selected, placement, __tex: names.single };
+  foliageMatCache.set(key, mats);
+
+  (async () => {
+    const t0 = await getBlockTexture(mats.__tex);
+
+    // Bamboo needs per-user UV shifting, so it must NOT share the global cached texture object.
+    const t = (key === 'BAMBOO') ? t0.clone() : t0;
+
+    if (key === 'BAMBOO') {
+      applyBambooUvToTexture(t);
+    }
+
+    for (const m of [base, selected, placement]) { m.map = t; m.needsUpdate = true; }
+  })();
+
+return mats;
+}
+
+// Apply initial grass opacity to placement materials.
+syncGrassOpacityUI();
 
 // Initial label
 syncGrassTextureIndicator();
@@ -748,8 +1347,8 @@ syncGrassTextureIndicator();
 
 // We build the grass directly from the Minecraft model JSON (tinted_cross.json)
 // so that rotations (including `rescale: true`) match the in-game geometry.
-const RESCALE_22_5 = 1 / Math.cos(0.39269908169872414) - 1; // 22.5°
-const RESCALE_45   = 1 / Math.cos(Math.PI / 4) - 1;         // 45°
+const RESCALE_22_5 = 1 / Math.cos(0.39269908169872414) - 1; // 22.5Â°
+const RESCALE_45   = 1 / Math.cos(Math.PI / 4) - 1;         // 45Â°
 
 /**
  * Compute the per-axis rescale factor used by Minecraft's FaceBakery when
@@ -776,7 +1375,8 @@ function mcRescaleVec(axis, angleDeg, rescale) {
 
 const grassModel = TINTED_CROSS_MODEL;
 
-function makeGrassMesh(){
+function makeGrassMesh(mat){
+  const mtl = mat ?? makePlantMaterial(PLACEHOLDER_TEX);
   const root = new THREE.Group();
 
   for (const elmt of (grassModel.elements ?? [])) {
@@ -797,24 +1397,24 @@ function makeGrassMesh(){
     let planeKind = 'box';
     if (sz < eps) {
       // XY plane (constant Z)
-      plane = new THREE.Mesh(new THREE.PlaneGeometry(sx, sy), baseMat);
+      plane = new THREE.Mesh(new THREE.PlaneGeometry(sx, sy), mtl);
       plane.position.set(cx, cy, cz);
       planeKind = 'xy';
     } else if (sx < eps) {
       // YZ plane (constant X)
-      plane = new THREE.Mesh(new THREE.PlaneGeometry(sz, sy), baseMat);
+      plane = new THREE.Mesh(new THREE.PlaneGeometry(sz, sy), mtl);
       plane.rotation.y = Math.PI / 2;
       plane.position.set(cx, cy, cz);
       planeKind = 'yz';
     } else if (sy < eps) {
-      // XZ plane (constant Y) — not used by tinted_cross but supported
-      plane = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), baseMat);
+      // XZ plane (constant Y) â€” not used by tinted_cross but supported
+      plane = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), mtl);
       plane.rotation.x = -Math.PI / 2;
       plane.position.set(cx, cy, cz);
       planeKind = 'xz';
     } else {
       // Fallback: thin box (shouldn't happen for tinted_cross)
-      plane = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), baseMat);
+      plane = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mtl);
       plane.position.set(cx, cy, cz);
       planeKind = 'box';
     }
@@ -824,7 +1424,7 @@ function makeGrassMesh(){
     if (plane.isMesh && plane.geometry?.type === 'PlaneGeometry') {
       const back = plane.clone();
       // Use FrontSide on both meshes so UVs remain consistent.
-      back.material = baseMat;
+      back.material = mtl;
       if (planeKind === 'xz') {
         back.rotation.x += Math.PI;
       } else {
@@ -881,14 +1481,143 @@ function makeGrassMesh(){
   return root;
 }
 
-function makePlacementPreviewMesh(){
-  const m = makeGrassMesh();
-  m.traverse(obj => {
-    if (obj.isMesh) obj.material = placementMat;
-  });
-  return m;
+function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
+  const mats = ensureFoliageMats(foliageId);
+  const variant = getActiveVariantFor(foliageId);
+
+  if (foliageId === 'BAMBOO') {
+    return makeBambooStackMesh(mats.placement, variant?.height ?? 1);
+  }
+  if (foliageId === 'POINTED_DRIPSTONE') {
+    return makeDripstoneStackMesh(mats.placement, variant?.height ?? 1, variant?.dir ?? 'up');
+  }
+
+  if (mats.model === 'double') {
+    return makeTallGrassMesh(mats.placementBottom, mats.placementTop);
+  }
+  return makeGrassMesh(mats.placement);
 }
 
+
+function makeTallGrassMesh(baseBottomMat, baseTopMat){
+  const root = new THREE.Group();
+
+  const bottom = makeGrassMesh(baseBottomMat);
+  bottom.position.set(0, 0, 0);
+  bottom.userData.__tallPart = 'bottom';
+  bottom.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'bottom'; });
+
+  const top = makeGrassMesh(baseTopMat);
+  top.position.set(0, 1, 0); // one block above
+  top.userData.__tallPart = 'top';
+  top.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'top'; });
+
+  root.add(bottom);
+  root.add(top);
+
+  // Tag meshes for raycasting.
+  root.traverse(obj => {
+    if (obj.isMesh) obj.userData.__isGrassPart = true;
+  });
+
+  return root;
+}
+
+
+function tagAsFoliagePart(root){
+  root.traverse(obj => {
+    if (obj.isMesh) obj.userData.__isGrassPart = true;
+  });
+  return root;
+}
+
+// Bamboo: render using the vanilla block model proportions (a thin 2x2 stalk in the block center).
+// We keep it simple: one 2/16 wide box per block stacked to the chosen height.
+
+function makeBambooStackMesh(mat, height=1){
+  const root = new THREE.Group();
+  const h = Math.max(1, Math.min(16, Math.trunc(height)));
+
+  // Vanilla bamboo stalk is a thin 2x2 post centered in the block, with UVs sampling only the
+  // 2px-wide stalk strip from bamboo_stalk.png (to avoid "smearing" the whole texture).
+  const geo = new THREE.BoxGeometry(2/16, 1, 2/16);
+
+  // Remap UVs: use the center stalk strip [7..9] on the U axis (2px wide), full V.
+  // This matches the vanilla block model better than using the whole 16px width.
+  const u0 = 7/16, u1 = 9/16;
+  const uv = geo.attributes.uv;
+  for (let i=0; i<uv.count; i++){
+    const u = uv.getX(i);
+    const v = uv.getY(i);
+    uv.setXY(i, (u < 0.5 ? u0 : u1), v);
+  }
+  uv.needsUpdate = true;
+
+  for (let i=0;i<h;i++){
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(0.5, i+0.5, 0.5);
+    root.add(mesh);
+  }
+  return tagAsFoliagePart(root);
+}
+
+
+// Pointed dripstone: use the vanilla model approach (two crossed planes) with the correct per-segment textures.
+// Vanilla assets define a shared "pointed_dripstone" parent model (crossed planes rotated 45°), and variants
+// are just different textures (up_tip, up_frustum, up_middle, up_base, and the down_* equivalents).
+//
+// Height selector:
+//  - h=1: tip
+//  - h=2: frustum + tip
+//  - h=3: base + frustum + tip
+//  - h>=4: base + middle*(h-3) + frustum + tip
+
+function makeDripstoneStackMesh(baseMat, height=1, dir='up'){
+  const root = new THREE.Group();
+  const h = Math.max(1, Math.min(16, Math.trunc(height)));
+  const d = (dir === 'down') ? 'down' : 'up';
+
+  // Bottom-to-top segment texture names in the assets repo.
+  function segListUp(hh){
+    if (hh === 1) return ['pointed_dripstone_up_tip'];
+    if (hh === 2) return ['pointed_dripstone_up_frustum','pointed_dripstone_up_tip'];
+    if (hh === 3) return ['pointed_dripstone_up_base','pointed_dripstone_up_frustum','pointed_dripstone_up_tip'];
+    const mid = new Array(hh - 3).fill('pointed_dripstone_up_middle');
+    return ['pointed_dripstone_up_base', ...mid, 'pointed_dripstone_up_frustum', 'pointed_dripstone_up_tip'];
+  }
+  function segListDown(hh){
+    // Tip at the bottom, base at the top.
+    if (hh === 1) return ['pointed_dripstone_down_tip'];
+    if (hh === 2) return ['pointed_dripstone_down_tip','pointed_dripstone_down_frustum'];
+    if (hh === 3) return ['pointed_dripstone_down_tip','pointed_dripstone_down_frustum','pointed_dripstone_down_base'];
+    const mid = new Array(hh - 3).fill('pointed_dripstone_down_middle');
+    return ['pointed_dripstone_down_tip', 'pointed_dripstone_down_frustum', ...mid, 'pointed_dripstone_down_base'];
+  }
+
+  const texNames = (d === 'down') ? segListDown(h) : segListUp(h);
+
+  for (let i=0;i<texNames.length;i++){
+    // Clone material per segment so each can have its own map.
+    const mat = baseMat.clone();
+    mat.map = PLACEHOLDER_TEX;
+    mat.needsUpdate = true;
+
+    const seg = makeGrassMesh(mat); // crossed planes (same geometry as foliage)
+    seg.position.set(0, i, 0);
+    root.add(seg);
+
+    (async () => {
+      const t = await getBlockTexture(texNames[i]);
+      mat.map = t;
+      mat.needsUpdate = true;
+    })();
+  }
+
+  return tagAsFoliagePart(root);
+}
+
+
+// (Legacy helper removed; handled via ensureFoliageMats + makePlacementPreviewMesh)
 // --- Grass instances state ---
 let nextId = 1;
 /** @type {Map<number, {id:number, block:THREE.Vector3, off:{x:number,y:number,z:number}, mesh:THREE.Group}>} */
@@ -900,12 +1629,28 @@ function keyForBlock(b){ return `${b.x}|${b.y}|${b.z}`; }
 function grassLabel(g){
   const b = g.block;
   const o = g.off;
-  return `#${g.id}  block(${b.x},${b.y},${b.z})  off(${o.x},${o.y},${o.z})`;
+  const def = FOLIAGE.byId.get(g.kind);
+  const name = def ? def.label : g.kind;
+
+  let extra = '';
+  if (g.variant && Number.isFinite(g.variant.height) && g.variant.height > 1) {
+    extra = ` h${Math.trunc(g.variant.height)}`;
+    if (g.kind === 'POINTED_DRIPSTONE' && g.variant.dir) extra += ` ${g.variant.dir}`;
+  }
+
+  return `#${g.id}  ${name}${extra}  block(${b.x},${b.y},${b.z})  off(${o.x},${o.y},${o.z})`;
 }
+
 
 function updateGrassMeshTransform(g){
   const blockOrigin = new THREE.Vector3(g.block.x, g.block.y, g.block.z);
-  const offset = offsetToVec3(g.off.x, g.off.y, g.off.z);
+  // Vanilla behavior (confirmed in 1.19 decompiled code):
+  // - short grass (Blocks.GRASS / Blocks.FERN) uses OffsetType.XYZ (includes vertical offset)
+  // - tall grass (Blocks.TALL_GRASS) uses OffsetType.XZ (no vertical offset)
+  // For OffsetType.XZ blocks (e.g. tall grass, flowers), Y is unobservable in-game.
+  // We hard-lock it to offY=15 (which maps to y=0) for visual consistency.
+  const oy = isYOffsetLocked(g.kind) ? 15 : g.off.y;
+  const offset = offsetToVec3ForKind(g.kind, g.off.x, oy, g.off.z);
   // Minecraft renders baked model vertices in block-local space [0..1] with the origin at the
   // *block corner*, then translates by BlockState.getOffset(pos). So the correct world-space
   // placement is simply: blockPosCorner + offset.
@@ -916,12 +1661,25 @@ function setSelected(id){
   selectedId = id;
   for (const g of grasses.values()) {
     const isSel = g.id === id;
-    g.mesh.traverse(obj => {
-      if (obj.isMesh) obj.material = isSel ? selectedMat : baseMat;
-    });
+
+    const mats = ensureFoliageMats(g.kind);
+    const model = mats.model;
+    if (model === 'double') {
+      g.mesh.traverse(obj => {
+        if (!obj.isMesh) return;
+        const part = obj.userData.__tallPart;
+        if (isSel) obj.material = (part === 'top') ? mats.selectedTop : mats.selectedBottom;
+        else obj.material = (part === 'top') ? mats.baseTop : mats.baseBottom;
+      });
+    } else {
+      g.mesh.traverse(obj => {
+        if (obj.isMesh) obj.material = isSel ? mats.selected : mats.base;
+      });
+    }
   }
 
   // sync UI
+// sync UI
   if (id == null) return;
   const g = grasses.get(id);
   if (!g) return;
@@ -930,9 +1688,18 @@ function setSelected(id){
   el.selBlockX.value = String(g.block.x);
   el.selBlockY.value = String(g.block.y);
   el.selBlockZ.value = String(g.block.z);
-  el.offX.value = String(g.off.x);
-  el.offY.value = String(g.off.y);
-  el.offZ.value = String(g.off.z);
+  el.offX.value = String(isPointedDripstone(g.kind) ? dripstoneRawToEff(g.off.x) : g.off.x);
+  el.offY.value = String(isYOffsetLocked(g.kind) ? 15 : g.off.y);
+  el.offZ.value = String(isPointedDripstone(g.kind) ? dripstoneRawToEff(g.off.z) : g.off.z);
+
+  // Tall grass
+  updateOffsetUiMode();
+
+  // Tall grass never uses Y offset. Disable the Y box in the GUI while it's selected.
+  if (el.offY) {
+    el.offY.disabled = isYOffsetLocked(g.kind);
+    if (isYOffsetLocked(g.kind)) el.offY.value = '15';
+  }
 
   // select in list
   for (const opt of el.grassList.options) {
@@ -953,13 +1720,37 @@ function refreshGrassList(){
   if (prev != null && grasses.has(prev)) setSelected(prev);
 }
 
-function addGrass(block, off = {x:7,y:7,z:7}){
+function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   const id = nextId++;
-  const mesh = makeGrassMesh();
+  const kind = FOLIAGE.byId.has(foliageId) ? foliageId : 'SHORT_GRASS';
+  const def = FOLIAGE.byId.get(kind);
+  const model = def?.model ?? 'single';
+  const mats = ensureFoliageMats(kind);
+
+  // Enforce vanilla semantics: XZ-only foliage has no Y offset.
+  // We store y=15 so offsetToVec3 maps to y=0.
+  const fixedOff = { ...off };
+  if (isYOffsetLocked(kind)) fixedOff.y = 15;
+
+  let mesh;
+  const variant = getActiveVariantFor(kind);
+  if (kind === 'BAMBOO') {
+    mesh = makeBambooStackMesh(mats.base, variant?.height ?? 1);
+  } else if (kind === 'POINTED_DRIPSTONE') {
+    mesh = makeDripstoneStackMesh(mats.base, variant?.height ?? 1, variant?.dir ?? 'up');
+  } else {
+    mesh = (model === 'double')
+      ? makeTallGrassMesh(mats.baseBottom, mats.baseTop)
+      : makeGrassMesh(mats.base);
+  }
+
   mesh.userData.__grassId = id;
   grassGroup.add(mesh);
-  const g = { id, block: block.clone(), off: { ...off }, mesh };
+
+  const g = { id, kind, block: block.clone(), off: { ...fixedOff }, mesh, variant: getActiveVariantFor(kind) };
   grasses.set(id, g);
+
+  // Ensure correct materials if this is the first selection.
   updateGrassMeshTransform(g);
   refreshGrassList();
   setSelected(id);
@@ -991,9 +1782,24 @@ function applyOffsetsFromUI({syncUI=true} = {}){
   const g = grasses.get(selectedId);
   if (!g) return;
 
-  g.off.x = wrap(Math.trunc(num(el.offX.value, g.off.x)), 0, 15);
-  g.off.y = wrap(Math.trunc(num(el.offY.value, g.off.y)), 0, 15);
-  g.off.z = wrap(Math.trunc(num(el.offZ.value, g.off.z)), 0, 15);
+  if (isPointedDripstone(g.kind)) {
+    g.off.x = dripstoneEffToRaw(el.offX.value);
+  } else {
+    g.off.x = wrap(Math.trunc(num(el.offX.value, g.off.x)), 0, 15);
+  }
+  if (isPointedDripstone(g.kind)) {
+    g.off.z = dripstoneEffToRaw(el.offZ.value);
+  } else {
+    g.off.z = wrap(Math.trunc(num(el.offZ.value, g.off.z)), 0, 15);
+  }
+
+  // XZ-only foliage: ignore UI Y edits and hard-lock to 15.
+  if (isYOffsetLocked(g.kind)) {
+    g.off.y = 15;
+    if (el.offY) el.offY.value = '15';
+  } else {
+    g.off.y = wrap(Math.trunc(num(el.offY.value, g.off.y)), 0, 15);
+  }
 
   updateGrassMeshTransform(g);
   refreshGrassList();
@@ -1034,9 +1840,13 @@ for (const k of ['selBlockX','selBlockY','selBlockZ']) {
 }
 
 el.centerOffsets.addEventListener('click', () => {
-  el.offX.value = '7';
-  el.offY.value = '7';
-  el.offZ.value = '7';
+  const g = (selectedId != null) ? grasses.get(selectedId) : null;
+  const isDrip = !!(g && isPointedDripstone(g.kind));
+  el.offX.value = isDrip ? '4' : '7';
+  el.offZ.value = isDrip ? '4' : '7';
+
+  // Tall grass cannot be Y-offset; keep it at 15.
+  el.offY.value = (g && isYOffsetLocked(g.kind)) ? '15' : '7';
   applyOffsetsFromUI();
 });
 
@@ -1050,7 +1860,9 @@ el.exportOffsets.addEventListener('click', () => {
   const lines = ordered.map(g => {
     const b = g.block;
     const o = g.off;
-    return `${b.x} ${b.y} ${b.z}  ${o.x} ${o.y} ${o.z}`;
+    const oy = isYOffsetLocked(g.kind) ? 15 : o.y;
+    // Always include foliage id so the cracker can apply the correct axis mask.
+    return `${b.x} ${b.y} ${b.z}  ${o.x} ${oy} ${o.z} ${g.kind}`;
   });
   el.exportBox.value = lines.join('\n');
   el.exportBox.focus();
@@ -1066,27 +1878,41 @@ function parseGrassDataStrict(text){
   for (let i=0;i<lines.length;i++){
     const raw = lines[i].trim();
     if (!raw) continue;
-    // strict: exactly 6 integers separated by whitespace
-    const m = raw.match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$/);
+
+    // Format:
+    //   blockX blockY blockZ  offX offY offZ   [kind]
+    // kind is optional. Supported tokens include the foliage ids (e.g. TALL_GRASS, DANDELION),
+    // plus legacy aliases: short / tall.
+    const m = raw.match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?(?:\s+.*)?$/);
     if (!m) throw new Error(`Invalid format on line ${i+1}. Expected: blockX blockY blockZ offX offY offZ`);
+
     const bx = parseInt(m[1],10), by = parseInt(m[2],10), bz = parseInt(m[3],10);
     const ox = parseInt(m[4],10), oy = parseInt(m[5],10), oz = parseInt(m[6],10);
+    let kind = (m[7] ? String(m[7]).trim() : 'SHORT_GRASS');
+    // Legacy aliases
+    if (/^short$/i.test(kind)) kind = 'SHORT_GRASS';
+    if (/^tall$/i.test(kind)) kind = 'TALL_GRASS';
+    kind = kind.toUpperCase();
+
+    // Normalize unknown foliage ids to SHORT_GRASS so the UI stays usable.
+    if (!FOLIAGE.byId.has(kind)) kind = 'SHORT_GRASS';
+
     if (![ox,oy,oz].every(v => Number.isInteger(v) && v>=0 && v<=15)){
-      throw new Error(`Offsets must be 0–15 on line ${i+1}. Got: ${ox} ${oy} ${oz}`);
+      throw new Error(`Offsets must be 0â€“15 on line ${i+1}. Got: ${ox} ${oy} ${oz}`);
     }
-    rows.push({bx,by,bz,ox,oy,oz});
+
+    rows.push({bx,by,bz,ox,oy,oz,kind});
   }
   if (!rows.length) throw new Error('No grass data found.');
   return rows;
 }
-
 el.loadGrassData.addEventListener('click', () => {
   try{
     const rows = parseGrassDataStrict(el.grassDataIn.value);
     el.exportBox.value = '';
     clearAllGrass();
     for (const r of rows){
-      addGrass(new THREE.Vector3(r.bx, r.by, r.bz), {x:r.ox, y:r.oy, z:r.oz});
+      addGrass(new THREE.Vector3(r.bx, r.by, r.bz), {x:r.ox, y:r.oy, z:r.oz}, r.kind);
     }
     // select first grass and set active block
     const first = [...grasses.values()].sort((a,b)=>a.id-b.id)[0];
@@ -1114,7 +1940,7 @@ el.crackCoords.addEventListener('click', async () => {
 
   el.crackOut.value = '';
   el.crackCoords.disabled = true;
-  el.crackStatus.textContent = 'Cracking… (this can take a while for large radii)';
+  el.crackStatus.textContent = 'Crackingâ€¦ (this can take a while for large radii)';
 
   const t0 = performance.now();
   try{
@@ -1127,7 +1953,7 @@ el.crackCoords.addEventListener('click', async () => {
       useWorkers: !!el.crackWorkers?.checked,
       onProgress: ({done, total, matches}) => {
         const pct = total ? (done/total*100) : 0;
-        el.crackStatus.textContent = `Cracking… ${pct.toFixed(1)}%  checked ${done.toLocaleString()} / ${total.toLocaleString()}  matches ${matches}`;
+        el.crackStatus.textContent = `Crackingâ€¦ ${pct.toFixed(1)}%  checked ${done.toLocaleString()} / ${total.toLocaleString()}  matches ${matches}`;
       }
     });
 
@@ -1138,16 +1964,16 @@ el.crackCoords.addEventListener('click', async () => {
     });
 
     if (res.warning) {
-      el.crackOut.value = `⚠ ${res.warning}\n\n` + (lines.join('\n') || '(no matches)');
+      el.crackOut.value = `âš  ${res.warning}\n\n` + (lines.join('\n') || '(no matches)');
     } else {
       el.crackOut.value = lines.length ? lines.join('\n') : '(no matches in the searched range)';
     }
-    el.crackStatus.textContent = `Done in ${(dt/1000).toFixed(2)}s — matches: ${res.matches.length}`;
+    el.crackStatus.textContent = `Done in ${(dt/1000).toFixed(2)}s â€” matches: ${res.matches.length}`;
     el.crackOut.focus();
     el.crackOut.select();
   } catch (err){
     console.error(err);
-    el.crackStatus.textContent = 'Error while cracking — see console.';
+    el.crackStatus.textContent = 'Error while cracking â€” see console.';
     el.crackOut.value = String(err?.message || err);
   } finally {
     el.crackCoords.disabled = false;
@@ -1207,43 +2033,76 @@ function pickBlockOnGround(e){
 
 // --- Coordinate cracking (grassfinder logic, adapted to browser) ---
 const GF = (() => {
-  const X_MULT = 0x2fc20f;
-  const Z_MULT = 0x6ebfff5;
-  const LCG_MULT = 0x285b825n;
-  const LCG_ADDEND = 11n;
-
-  // Helpers for exact Java/Rust-style wrapping semantics.
-  const i32 = (v) => BigInt.asIntN(32, BigInt(v));
-  const i64 = (v) => BigInt.asIntN(64, v);
-
-  function getCoordRandom(x, y, z){
-    // - x/z multiplied as signed 32-bit ints (wrapping), then sign-extended
-    // - subsequent math wraps as signed 64-bit
-    const sx = i64(BigInt.asIntN(32, i32(x) * i32(X_MULT)));
-    const sz = i64(BigInt.asIntN(32, i32(z) * i32(Z_MULT)));
-    const sy = i64(i32(y));
-
-    let seed = i64(sx ^ sz ^ sy);
-    seed = i64(seed * seed * LCG_MULT + seed * LCG_ADDEND);
-    return seed;
-  }
+  // Vanilla formula (b1.7.3 BlockRenderer / later MathHelper):
+  //   long l = (x*3129871) ^ (z*116129781L) ^ y;
+  //   l = l*l*42317861L + l*11L;
+  // Offsets use bits 16..27 of l.
+  //
+  // Those bits live in the low 32 bits, and the low 32 bits depend only on the low 32 bits
+  // of intermediate results. So we can compute the packed offset using fast 32-bit Math.imul
+  // instead of BigInt-heavy 64-bit math.
+  const X_MULT = 0x2fc20f | 0;    // 3129871
+  const Z_MULT = 0x6ebfff5 | 0;   // 116129781
+  const LCG_MULT = 0x285b825 | 0; // 42317861
+  const LCG_ADDEND = 11 | 0;
 
   function packedGrassOffset(x, y, z, version){
-    const yy = (version === 'post1_12') ? 0 : y;
-    const seed = getCoordRandom(x, yy, z);
-    const ox = Number((seed >> 16n) & 15n);
-    const oy = Number((seed >> 20n) & 15n);
-    const oz = Number((seed >> 24n) & 15n);
-    return (ox | (oy << 4) | (oz << 8)) >>> 0; // 12-bit packed
+    const yy = (version === 'post1_12') ? 0 : (y | 0);
+    const s = (Math.imul(x | 0, X_MULT) ^ Math.imul(z | 0, Z_MULT) ^ yy) | 0;
+    // low32(l) = (s*s*LCG_MULT + s*LCG_ADDEND) mod 2^32
+    const lo = (Math.imul(Math.imul(s, s), LCG_MULT) + Math.imul(s, LCG_ADDEND)) | 0;
+    return ((lo >>> 16) & 0xFFF) >>> 0; // packed (ox | oy<<4 | oz<<8)
   }
 
-  function scorePacked(predPacked, expectedPacked, tol){
+  // --- Pointed dripstone equivalence handling ---
+  // In vanilla, pointed dripstone's final X/Z positions clamp such that indices 0..3 are
+  // indistinguishable (all behave like "negative edge") and 12..15 are indistinguishable
+  // ("positive edge"). The cracker must treat those as equivalence classes, otherwise
+  // real-world data can produce zero matches.
+  function dripstoneNibbleMatches(pred, expected){
+    const p = pred & 15;
+    const e = expected & 15;
+    if (e <= 3) return p <= 3;
+    if (e >= 12) return p >= 12;
+    return p === e;
+  }
+
+  function dripstoneNibbleDistance(pred, expected){
+    const p = pred & 15;
+    const e = expected & 15;
+    if (e <= 3) {
+      // distance to nearest of {0,1,2,3}
+      if (p <= 3) return 0;
+      return p - 3;
+    }
+    if (e >= 12) {
+      // distance to nearest of {12,13,14,15}
+      if (p >= 12) return 0;
+      return 12 - p;
+    }
+    return Math.abs(p - e);
+  }
+
+  // Score a predicted packed offset against an expected packed offset.
+  // `mask` is a 12-bit nibble mask: if an axis nibble is 0, that axis is ignored.
+  // This is used to support blocks like tall grass (OffsetType.XZ) where Y is unobservable.
+  //
+  // Pointed dripstone note:
+  // Vanilla generates offsets on the standard 0..15 grid and then clamps the *final* position.
+  // That means the underlying nibble indices 0..3 are indistinguishable (all clamp to -1/8),
+  // and 12..15 are indistinguishable (all clamp to +1/8). When cracking, we must therefore
+  // treat those index ranges as equivalence classes rather than exact values.
+
+  function scorePacked(predPacked, expectedPacked, mask, tol, isDripstone){
     // tol in {0,1,2}
     let score = 0;
+    const drip = !!isDripstone;
     for (let axis = 0; axis < 3; axis++) {
+      const nibMask = (mask >> (axis * 4)) & 15;
+      if (nibMask === 0) continue;
       const p = (predPacked >> (axis * 4)) & 15;
       const e = (expectedPacked >> (axis * 4)) & 15;
-      const d = Math.abs(p - e);
+      const d = (drip && axis !== 1) ? dripstoneNibbleDistance(p, e) : Math.abs(p - e);
       if (d <= tol) score += d;
       else score += d * d;
     }
@@ -1254,6 +2113,11 @@ const GF = (() => {
     const ordered = [...grasses.values()].sort((a,b)=>a.id-b.id);
     return ordered.map(g => ({
       pos: { x: g.block.x|0, y: g.block.y|0, z: g.block.z|0 },
+      kind: g.kind,
+      isDripstone: isPointedDripstone(g.kind),
+      // For tall grass (OffsetType.XZ), Y is not observable in-game.
+      // We keep a 12-bit mask so the solver can ignore Y constraints for tall grass samples.
+      mask: foliageMaskFor(FOLIAGE.byId.get(g.kind)?.offsetType ?? 'XYZ'),
       packed: ((g.off.x|0) | ((g.off.y|0) << 4) | ((g.off.z|0) << 8)) >>> 0,
     }));
   }
@@ -1265,38 +2129,67 @@ const GF = (() => {
     if (workerURL) return workerURL;
 
     const src = `
-      const X_MULT = ${X_MULT};
-      const Z_MULT = ${Z_MULT};
-      const LCG_MULT = ${LCG_MULT}n;
-      const LCG_ADDEND = ${LCG_ADDEND}n;
-
-      const i32 = (v) => BigInt.asIntN(32, BigInt(v));
-      const i64 = (v) => BigInt.asIntN(64, v);
-
-      function getCoordRandom(x, y, z){
-        const sx = i64(BigInt.asIntN(32, i32(x) * i32(X_MULT)));
-        const sz = i64(BigInt.asIntN(32, i32(z) * i32(Z_MULT)));
-        const sy = i64(i32(y));
-        let seed = i64(sx ^ sz ^ sy);
-        seed = i64(seed * seed * LCG_MULT + seed * LCG_ADDEND);
-        return seed;
-      }
+      // Vanilla formula (b1.7.3 BlockRenderer / later MathHelper):
+      //   long l = (x*3129871) ^ (z*116129781L) ^ y;
+      //   l = l*l*42317861L + l*11L;
+      // Offsets use bits 16..27 of l.
+      //
+      // Those bits live in the low 32 bits, and the low 32 bits depend only on the low 32 bits
+      // of intermediate results. So we can compute the packed offset using fast 32-bit Math.imul
+      // instead of BigInt-heavy 64-bit math.
+      const X_MULT = ${X_MULT} | 0;
+      const Z_MULT = ${Z_MULT} | 0;
+      const LCG_MULT = ${LCG_MULT} | 0;
+      const LCG_ADDEND = ${LCG_ADDEND} | 0;
 
       function packedGrassOffset(x, y, z, version){
-        const yy = (version === 'post1_12') ? 0 : y;
-        const seed = getCoordRandom(x, yy, z);
-        const ox = Number((seed >> 16n) & 15n);
-        const oy = Number((seed >> 20n) & 15n);
-        const oz = Number((seed >> 24n) & 15n);
-        return (ox | (oy << 4) | (oz << 8)) >>> 0;
+        const yy = (version === 'post1_12') ? 0 : (y | 0);
+        const s = (Math.imul(x | 0, X_MULT) ^ Math.imul(z | 0, Z_MULT) ^ yy) | 0;
+        // low32(l) = (s*s*LCG_MULT + s*LCG_ADDEND) mod 2^32
+        const lo = (Math.imul(Math.imul(s, s), LCG_MULT) + Math.imul(s, LCG_ADDEND)) | 0;
+        return ((lo >>> 16) & 0xFFF) >>> 0;
       }
 
-      function scorePacked(predPacked, expectedPacked, tol){
-        let score = 0;
+      // Score a predicted packed offset against an expected packed offset.
+      // mask is a 12-bit nibble mask: if an axis nibble is 0, that axis is ignored.
+      function dripstoneNibbleDistance(pred, expected){
+        const p = pred & 15;
+        const e = expected & 15;
+        if (e <= 3) { if (p <= 3) return 0; return p - 3; }
+        if (e >= 12) { if (p >= 12) return 0; return 12 - p; }
+        return Math.abs(p - e);
+      }
+
+      function dripstoneNibbleMatches(pred, expected){
+        const p = pred & 15;
+        const e = expected & 15;
+        if (e <= 3) return p <= 3;
+        if (e >= 12) return p >= 12;
+        return p === e;
+      }
+
+      function strictMatch(predPacked, expectedPacked, mask, isDrip){
+        if (!isDrip) return ((predPacked & mask) === expectedPacked);
         for (let axis = 0; axis < 3; axis++) {
+          const nibMask = (mask >> (axis * 4)) & 15;
+          if (nibMask === 0) continue;
           const p = (predPacked >> (axis * 4)) & 15;
           const e = (expectedPacked >> (axis * 4)) & 15;
-          const d = Math.abs(p - e);
+          if (axis === 1) { if (p !== e) return false; }
+          else { if (!dripstoneNibbleMatches(p, e)) return false; }
+        }
+        return true;
+      }
+
+      function scorePacked(predPacked, expectedPacked, mask, tol, isDrip){
+        let score = 0;
+        const drip = !!isDrip;
+        for (let axis = 0; axis < 3; axis++) {
+          const nibMask = (mask >> (axis * 4)) & 15;
+          if (nibMask === 0) continue;
+          const p = (predPacked >> (axis * 4)) & 15;
+          const e = (expectedPacked >> (axis * 4)) & 15;
+          const d = (drip && axis !== 1) ? dripstoneNibbleDistance(p, e) : Math.abs(p - e);
           if (d <= tol) score += d;
           else score += d * d;
         }
@@ -1304,7 +2197,8 @@ const GF = (() => {
       }
 
       onmessage = (e) => {
-        const { jobId, x0, x1, z0, z1, y0, y1, version, rel, maxMatches, post1_12_anyY, mode, tol, maxScore } = e.data;
+        const { jobId, x0, x1, z0, z1, y0, y1, version, relDx, relDy, relDz, relPacked, relMask, relDrip, maxMatches, post1_12_anyY, mode, tol, maxScore } = e.data;
+        const relLen = ((relPacked && relPacked.length) | 0);
         const matches = [];
         let done = 0;
         const xCount = (x1 - x0 + 1);
@@ -1316,17 +2210,16 @@ const GF = (() => {
 
         function checkAt(x, y, z){
           let score = 0;
-          for (let i=0;i<rel.length;i++){
-            const r = rel[i];
-            const ax = x + r.dx;
-            const ay = y + r.dy;
-            const az = z + r.dz;
+          for (let i=0;i<relLen;i++){
+            const ax = x + relDx[i];
+            const ay = y + relDy[i];
+            const az = z + relDz[i];
             const p = packedGrassOffset(ax, ay, az, version);
 
             if (mode === 'strict') {
-              if (p !== r.packed) return -1;
+              if (!strictMatch(p, relPacked[i], relMask[i], relDrip && relDrip[i])) return -1;
             } else {
-              score += scorePacked(p, r.packed, tol|0);
+              score += scorePacked(p, relPacked[i], relMask[i], tol|0, relDrip && relDrip[i]);
               if (score > (maxScore|0)) return -1;
             }
           }
@@ -1403,11 +2296,32 @@ const GF = (() => {
       dx: (r.pos.x - recorigin.x) | 0,
       dy: (r.pos.y - recorigin.y) | 0,
       dz: (r.pos.z - recorigin.z) | 0,
-      packed: r.packed >>> 0,
+      isDripstone: !!r.isDripstone,
+      mask: (r.mask & 0xFFF) >>> 0,
+      // Mask expected packed so ignored axes don't accidentally constrain results.
+      packed: (r.packed & r.mask & 0xFFF) >>> 0,
     }));
 
     // Check farthest samples first for early mismatch exit.
     rel = rel.sort((a,b) => (Math.abs(b.dx)+Math.abs(b.dz)+Math.abs(b.dy)) - (Math.abs(a.dx)+Math.abs(a.dz)+Math.abs(a.dy)));
+
+    // Convert rel samples to tight typed arrays for faster hot-loop access and cheaper worker transfer.
+    const relLen = rel.length | 0;
+    const relDx = new Int32Array(relLen);
+    const relDy = new Int32Array(relLen);
+    const relDz = new Int32Array(relLen);
+    const relPacked = new Uint16Array(relLen);
+    const relMask = new Uint16Array(relLen);
+    const relDrip = new Uint8Array(relLen);
+    for (let i=0;i<relLen;i++){
+      const r = rel[i];
+      relDx[i] = r.dx | 0;
+      relDy[i] = r.dy | 0;
+      relDz[i] = r.dz | 0;
+      relPacked[i] = (r.packed & 0xFFF) >>> 0;
+      relMask[i] = (r.mask & 0xFFF) >>> 0;
+      relDrip[i] = r.isDripstone ? 1 : 0;
+    }
 
     const x0 = Math.floor(centerX - radius);
     const x1 = Math.floor(centerX + radius);
@@ -1425,7 +2339,11 @@ const GF = (() => {
     const wantWorkers = !!useWorkers && !!window.Worker;
     const hw = Math.max(1, Math.min(16, (navigator.hardwareConcurrency|0) || 1));
     const xCount = (x1 - x0 + 1);
-    const nWorkers = wantWorkers ? Math.max(1, Math.min(hw, xCount)) : 1;
+
+    // Old versions (b1.5â€“1.12) do far more work because Y affects offsets.
+    // Cap worker count to 4 to keep overhead low and match the newer-cracker style.
+    const targetWorkers = (version === 'postb1_5') ? 4 : hw;
+    const nWorkers = wantWorkers ? Math.max(1, Math.min(targetWorkers, hw, xCount)) : 1;
 
     if (wantWorkers && nWorkers > 1) {
       const url = getWorkerURL();
@@ -1465,14 +2383,16 @@ const GF = (() => {
           const msg = ev.data;
           if (!msg || msg.jobId !== (jobIdBase + idx)) return;
           if (msg.type === 'progress'){
-            progress[idx] = msg.done|0;
-            totals[idx] = msg.total|0;
+            // Don't coerce progress counters to int32. Large radii can overflow signed 32-bit
+            // and make the displayed percentage go backwards.
+            progress[idx] = Number(msg.done);
+            totals[idx] = Number(msg.total);
             emitProgress();
             return;
           }
           if (msg.type === 'done'){
-            progress[idx] = msg.done|0;
-            totals[idx] = msg.total|0;
+            progress[idx] = Number(msg.done);
+            totals[idx] = Number(msg.total);
 
             if (!hitCap) {
               for (const m of msg.matches){
@@ -1497,7 +2417,12 @@ const GF = (() => {
           z0, z1,
           y0: yy0, y1: yy1,
           version,
-          rel,
+          relDx,
+          relDy,
+          relDz,
+          relPacked,
+          relMask,
+          relDrip,
           maxMatches: MAX_MATCHES,
           post1_12_anyY,
           mode,
@@ -1514,7 +2439,7 @@ const GF = (() => {
 
       const warning =
         hitCap ? `Hit the cap of ${MAX_MATCHES} matches. Reduce radius / tighten inputs.` :
-        (post1_12_anyY && yy1 !== yy0) ? `In 1.13+ mode, grass offsets do not depend on Y. Reported Y is a placeholder; any Y in [${yy0}, ${yy1}] is possible.` :
+        (post1_12_anyY && yy1 !== yy0) ? `` :
         null;
 
       if (mode === 'scored') {
@@ -1530,16 +2455,31 @@ const GF = (() => {
     // --- Fallback: single-threaded chunked scan (still optimized) ---
     function checkAt(x,y,z){
       let score = 0;
-      for (let i=0;i<rel.length;i++){
-        const r = rel[i];
-        const ax = x + r.dx;
-        const ay = y + r.dy;
-        const az = z + r.dz;
+      for (let i=0;i<relLen;i++){
+        const ax = x + relDx[i];
+        const ay = y + relDy[i];
+        const az = z + relDz[i];
         const p = packedGrassOffset(ax, ay, az, version);
+
         if (mode === 'strict') {
-          if (p !== r.packed) return -1;
+          // Pointed dripstone edge indices are ambiguous (0..3 and 12..15 collapse).
+          // Treat them as equivalence classes during matching.
+          const isDrip = !!relDrip[i];
+          if (!isDrip) {
+            if ((p & relMask[i]) !== relPacked[i]) return -1;
+          } else {
+            // Per-axis strict match with plateau equivalence on X/Z.
+            for (let axis = 0; axis < 3; axis++) {
+              const nibMask = (relMask[i] >> (axis * 4)) & 15;
+              if (nibMask === 0) continue;
+              const pn = (p >> (axis * 4)) & 15;
+              const en = (relPacked[i] >> (axis * 4)) & 15;
+              if (axis === 1) { if (pn !== en) return -1; }
+              else { if (!dripstoneNibbleMatches(pn, en)) return -1; }
+            }
+          }
         } else {
-          score += scorePacked(p, r.packed, tol);
+          score += scorePacked(p, relPacked[i], relMask[i], tol, relDrip[i]);
           if (score > MAX_SCORE) return -1;
         }
       }
@@ -1581,7 +2521,7 @@ const GF = (() => {
 
           if (cz > z1) {
             const warning = (yy1 !== yy0)
-              ? `In 1.13+ mode, grass offsets do not depend on Y. Reported Y is a placeholder; any Y in [${yy0}, ${yy1}] is possible.`
+              ? ``
               : null;
             if (mode === 'scored') {
               matches.sort((a,b)=> (a.score-b.score) || (a.x-b.x) || (a.z-b.z) || (a.y-b.y));
@@ -1643,6 +2583,34 @@ let placementBlock = new THREE.Vector3(0, 0, 0);
 let placementPreview = null;
 const placementOff = { x: 7, y: 7, z: 7 };
 
+function ensurePlacementOffsetRules(){
+  // XZ-only foliage cannot be Y-offset.
+  if (isYOffsetLocked(activeFoliageId)) placementOff.y = 15;
+}
+
+function ensurePlacementPreview(){
+  const previewKey = foliageSupportsHeight(activeFoliageId)
+    ? `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}`
+    : activeFoliageId;
+  if (placementPreview && placementPreview.userData.__previewKey === previewKey) return;
+
+  if (placementPreview) {
+    scene.remove(placementPreview);
+    // Best-effort dispose.
+    placementPreview.traverse(obj => {
+      if (obj.isMesh && obj.geometry) obj.geometry.dispose?.();
+    });
+    placementPreview = null;
+  }
+
+  placementPreview = makePlacementPreviewMesh(activeFoliageId);
+  placementPreview.userData.__placementPreview = true;
+  placementPreview.userData.__previewKey = previewKey;
+  placementPreview.userData.__previewFoliageId = activeFoliageId;
+  scene.add(placementPreview);
+}
+
+
 // A reusable raycast plane that we move to the current placement Y.
 const placementPlane = ground.clone();
 placementPlane.material = ground.material; // invisible
@@ -1651,14 +2619,39 @@ scene.add(placementPlane);
 function pickBlockOnPlaneY(e, y){
   if (!setNDCFromMouseEvent(e)) return null;
   raycaster.setFromCamera(ndc, camera);
-  placementPlane.position.set(camera.position.x, y, camera.position.z);
-  const hits = raycaster.intersectObject(placementPlane, false);
-  if (!hits.length) return null;
-  const p = hits[0].point;
+
+  // Robust mouse-to-world mapping for a horizontal plane at Y=y.
+  // Using math planes (instead of intersecting a finite mesh) avoids "no hit" cases
+  // that can happen when the plane is above the camera, behind the ray, or when the
+  // ray is nearly parallel to the plane.
+  const targetY = y;
+
+  const ray = raycaster.ray;
+  const up = new THREE.Vector3(0, 1, 0);
+  const p = new THREE.Vector3();
+
+  // 1) Try the actual target plane.
+  const targetPlane = new THREE.Plane(up, -targetY);
+  let ok = ray.intersectPlane(targetPlane, p);
+
+  // 2) Fallback: intersect a plane at the camera's Y to get stable X/Z,
+  // then re-apply the desired targetY.
+  if (!ok) {
+    const camPlane = new THREE.Plane(up, -camera.position.y);
+    ok = ray.intersectPlane(camPlane, p);
+  }
+
+  // 3) Final fallback: if the ray is parallel to both planes (rare, e.g. perfectly horizontal),
+  // take a point some distance along the ray.
+  if (!ok) {
+    p.copy(ray.origin).addScaledVector(ray.direction, 16);
+  }
+
   const bx = Math.floor(p.x);
   const bz = Math.floor(p.z);
-  return new THREE.Vector3(bx, y, bz);
+  return new THREE.Vector3(bx, targetY, bz);
 }
+
 
 function updatePlacementPreviewFromEvent(e){
   if (!placementMode) return;
@@ -1666,7 +2659,7 @@ function updatePlacementPreviewFromEvent(e){
   if (!b) return;
   placementBlock.copy(b);
   if (placementPreview) {
-    const off = offsetToVec3(placementOff.x, placementOff.y, placementOff.z);
+    const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
     placementPreview.position.set(b.x + off.x, b.y + off.y, b.z + off.z);
   }
 }
@@ -1676,14 +2669,9 @@ function enterPlacementMode(startY){
   placementY = Math.trunc(startY);
   placementBlock.set(Math.trunc(activeBlock.x), placementY, Math.trunc(activeBlock.z));
 
-  if (!placementPreview) {
-    placementPreview = makePlacementPreviewMesh();
-    // Preview should not be pickable as an existing grass instance.
-    placementPreview.userData.__placementPreview = true;
-    scene.add(placementPreview);
-  }
+  ensurePlacementPreview();
   placementPreview.visible = true;
-  const off = offsetToVec3(placementOff.x, placementOff.y, placementOff.z);
+  const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
   placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
 }
 
@@ -1705,14 +2693,11 @@ function enterPlacementModeAtBlock(startBlock){
   placementY = Math.trunc(startBlock.y);
   placementBlock.set(Math.trunc(startBlock.x), placementY, Math.trunc(startBlock.z));
 
-  if (!placementPreview) {
-    placementPreview = makePlacementPreviewMesh();
-    // Preview should not be pickable as an existing grass instance.
-    placementPreview.userData.__placementPreview = true;
-    scene.add(placementPreview);
-  }
+  ensurePlacementOffsetRules();
+
+  ensurePlacementPreview();
   placementPreview.visible = true;
-  const off = offsetToVec3(placementOff.x, placementOff.y, placementOff.z);
+  const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
   placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
 }
 
@@ -1768,8 +2753,11 @@ window.addEventListener('keydown', (e) => {
   // Grass texture quick toggle (ignore when typing in inputs)
   const tag0 = document.activeElement?.tagName?.toLowerCase();
   const typing0 = (tag0 === 'input' || tag0 === 'textarea' || tag0 === 'select');
-  if (!typing0 && (e.key === '1' || e.key === '2')) {
-    setGrassTexture(e.key === '1' ? 'jappa' : 'prog');
+  // Textures are loaded from the linked Minecraft assets repo now, so 1/2 are unused.
+
+  // Quick toggle between short grass and tall grass (legacy hotkey).
+  if (!typing0 && e.key === '3') {
+    setPlacementFoliage(activeFoliageId === 'TALL_GRASS' ? 'SHORT_GRASS' : 'TALL_GRASS');
     e.preventDefault();
     return;
   }
@@ -1794,7 +2782,7 @@ window.addEventListener('keydown', (e) => {
       placementY += (key === 'r') ? 1 : -1;
       placementBlock.y = placementY;
       if (placementPreview) {
-        const off = offsetToVec3(placementOff.x, placementOff.y, placementOff.z);
+        const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
         placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
       }
       e.preventDefault();
@@ -1821,13 +2809,47 @@ window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase();
 
   // MC axes: +Z south. W should move north => offZ--.
-  if (key === 'w' || e.key === 'ArrowUp') { g.off.z = wrap(g.off.z - 1, 0, 15); changed = true; }
-  if (key === 's' || e.key === 'ArrowDown') { g.off.z = wrap(g.off.z + 1, 0, 15); changed = true; }
-  if (key === 'a' || e.key === 'ArrowLeft') { g.off.x = wrap(g.off.x - 1, 0, 15); changed = true; }
-  if (key === 'd' || e.key === 'ArrowRight') { g.off.x = wrap(g.off.x + 1, 0, 15); changed = true; }
+  if (key === 'w' || e.key === 'ArrowUp') {
+    if (isPointedDripstone(g.kind)) {
+      const ez = dripstoneRawToEff(g.off.z);
+      g.off.z = dripstoneEffToRaw(wrap(ez - 1, 0, 9));
+    } else {
+      g.off.z = wrap(g.off.z - 1, 0, 15);
+    }
+    changed = true;
+  }
+  if (key === 's' || e.key === 'ArrowDown') {
+    if (isPointedDripstone(g.kind)) {
+      const ez = dripstoneRawToEff(g.off.z);
+      g.off.z = dripstoneEffToRaw(wrap(ez + 1, 0, 9));
+    } else {
+      g.off.z = wrap(g.off.z + 1, 0, 15);
+    }
+    changed = true;
+  }
+  if (key === 'a' || e.key === 'ArrowLeft') {
+    if (isPointedDripstone(g.kind)) {
+      const ex = dripstoneRawToEff(g.off.x);
+      g.off.x = dripstoneEffToRaw(wrap(ex - 1, 0, 9));
+    } else {
+      g.off.x = wrap(g.off.x - 1, 0, 15);
+    }
+    changed = true;
+  }
+  if (key === 'd' || e.key === 'ArrowRight') {
+    if (isPointedDripstone(g.kind)) {
+      const ex = dripstoneRawToEff(g.off.x);
+      g.off.x = dripstoneEffToRaw(wrap(ex + 1, 0, 9));
+    } else {
+      g.off.x = wrap(g.off.x + 1, 0, 15);
+    }
+    changed = true;
+  }
 
-  if (key === 'r') { g.off.y = wrap(g.off.y + 1, 0, 15); changed = true; }
-  if (key === 'f') { g.off.y = wrap(g.off.y - 1, 0, 15); changed = true; }
+  if (!isYOffsetLocked(g.kind)) {
+    if (key === 'r') { g.off.y = wrap(g.off.y + 1, 0, 15); changed = true; }
+    if (key === 'f') { g.off.y = wrap(g.off.y - 1, 0, 15); changed = true; }
+  }
 
   if (e.key === 'Enter') {
     // "Confirm" (keeps values). We just sync UI.
@@ -1847,10 +2869,10 @@ window.addEventListener('keydown', (e) => {
 // --- Render loop ---
 function animate(){
   updateCameraFromUI();
-  // Render the 3D scene to the offscreen WebGL canvas (RENDER_W×RENDER_H).
+  // Render the 3D scene to the offscreen WebGL canvas (RENDER_WÃ—RENDER_H).
   renderer.render(scene, camera);
 
-  // Composite into the fixed 960×540 viewport canvas with pan/zoom.
+  // Composite into the fixed 960Ã—540 viewport canvas with pan/zoom.
   const cw = viewCanvas.clientWidth || 960;
   const ch = viewCanvas.clientHeight || 540;
   if (viewCanvas.width !== cw) viewCanvas.width = cw;
@@ -1866,10 +2888,8 @@ function animate(){
 
   const renderLeft = (VIEW_W - RENDER_W) / 2;
   const renderTop  = (VIEW_H - RENDER_H) / 2;
-  // Draw 3D render
-  viewCtx.drawImage(webglCanvas, renderLeft, renderTop, RENDER_W, RENDER_H);
-
-  // Draw overlay on top (never scaled), centered in the workspace.
+  // Draw overlay first (never scaled), centered in the workspace.
+  // This ensures all 3D helpers (including the grass overlay) render *on top* of the image overlay.
   if (overlayVisible && overlayImage) {
     const ox = Math.round((VIEW_W - overlayImage.naturalWidth) / 2);
     const oy = Math.round((VIEW_H - overlayImage.naturalHeight) / 2);
@@ -1877,6 +2897,10 @@ function animate(){
     viewCtx.drawImage(overlayImage, ox, oy);
     viewCtx.globalAlpha = 1;
   }
+
+  // Draw 3D render on top
+  viewCtx.drawImage(webglCanvas, renderLeft, renderTop, RENDER_W, RENDER_H);
   requestAnimationFrame(animate);
 }
 animate();
+

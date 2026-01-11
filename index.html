@@ -30,13 +30,14 @@
         </div>
 
         <div class="row fov-nudge">
-          <div class="fov-warning">Use toggle if using old Minecraft screenshot (nudge camera by 0.05)</div>
+          <div class="fov-warning">Use nudge toggle if using an old Minecraft screenshot with in-game F3 coords to account for camera nudge</div>
           <label class="toggle"><input id="oldCamNudge" type="checkbox" /> Old Minecraft camera nudge (+0.05)</label>
+        <label class="toggle"><input id="reallyOldCamNudge" type="checkbox" /> Really old Minecraft camera nudge (-0.10)</label>
         </div>
 
         <div class="row">
           <label class="toggle"><input id="useFeetY" type="checkbox" checked /> Feet Y (Minecraft XYZ)</label>
-          <label class="toggle"><input id="centerTpXZ" type="checkbox" checked /> Center X/Z integers (.5)</label>
+          <label class="toggle"><input id="centerTpXZ" type="checkbox" /> Center X/Z integers (.5)</label>
           <!-- Workspace size is still used internally, but the inputs are hidden to reduce UI clutter. -->
           <input id="viewW" type="hidden" value="960" />
           <input id="viewH" type="hidden" value="540" />
@@ -49,11 +50,12 @@
             <input id="overlayFile" type="file" accept="image/png,image/jpeg" />
           </label>
           <label>Overlay opacity <input id="overlayOpacity" type="range" min="0" max="1" step="0.01" value="0.65" /></label>
+          <label>Grass opacity <input id="grassOpacity" type="range" min="0" max="1" step="0.01" value="1" /></label>
           <label><input id="showOverlay" type="checkbox" checked /> Show overlay</label>
           <label><input id="showGrid" type="checkbox" checked /> Show grid</label>
           <label class="range">
-            Grid radius <span id="gridRadiusLabel">24</span>
-            <input id="gridRadius" type="range" min="2" max="64" step="1" value="24" />
+            Grid radius <span id="gridRadiusLabel">4</span>
+            <input id="gridRadius" type="range" min="2" max="64" step="1" value="4" />
           </label>
           <label><input id="showGrass" type="checkbox" checked /> Show grass overlay</label>
           <span class="hint">Camera mouse-look is disabled. Use the numeric camera inputs above.</span>
@@ -69,7 +71,7 @@
             <div><b>Left click</b>: select grass</div>
             <div><b>Right click</b>: enter placement mode</div>
             <div><b>Right click again</b>: confirm placement</div>
-            <div><b>WASD / arrow keys</b>: move the selected grass offset X/Z (snaps 0–15)</div>
+            <div><b>WASD / arrow keys</b>: move the selected offset X/Z (snaps to valid steps)</div>
             <div><b>R / F</b>: adjust offset Y (0–15)</div>
             <div><b>Enter</b>: confirm selection (no-op, keeps values)</div>
           </div>
@@ -78,11 +80,18 @@
 
 
         <div class="row">
-          <label>Offset X (0–15) <input id="offX" type="number" min="0" max="15" step="1" value="7" /></label>
+          <label>Offset X (<span id="offXRange">0–15</span>) <input id="offX" type="number" min="0" max="15" step="1" value="7" /></label>
           <label>Offset Y (0–15) <input id="offY" type="number" min="0" max="15" step="1" value="7" /></label>
-          <label>Offset Z (0–15) <input id="offZ" type="number" min="0" max="15" step="1" value="7" /></label>
+          <label>Offset Z (<span id="offZRange">0–15</span>) <input id="offZ" type="number" min="0" max="15" step="1" value="7" /></label>
           <button id="applyOffsets" type="button">Apply to selected</button>
           <button id="centerOffsets" type="button">Center (7,7,7)</button>
+        </div>
+
+        <div id="dripstoneOffsetNote" class="foliage-variant hidden" title="Pointed dripstone offset precision">
+          <div style="font-size: 12px; opacity: 0.9; line-height: 1.3;">
+            <b>Pointed dripstone note:</b> edge offsets are <b>not uniquely recoverable</b> (vanilla collapses 0–3 and 12–15 into the same final position).
+            For best cracking accuracy, prefer dripstone that’s closer to the <b>center</b> of a block.
+          </div>
         </div>
 
         <div class="row">
@@ -101,12 +110,12 @@
         <div class="row">
           <button id="exportOffsets" type="button">Export offsets</button>
           <button id="clearGrass" type="button">Clear</button>
-          <span class="hint">Export format: <code>blockX blockY blockZ  offX offY offZ</code> (one per line)</span>
+          <span class="hint">Export format: <code>blockX blockY blockZ  offX offY offZ KIND</code> (one per line)</span>
         </div>
 
         <div class="row" style="margin-top:10px;">
           <label for="grassDataIn">Grass data input (strict)</label>
-          <span class="hint">Paste lines in format: <code>blockX blockY blockZ  offX offY offZ</code> (integers; offsets 0–15)</span>
+          <span class="hint">Paste lines in format: <code>blockX blockY blockZ  offX offY offZ KIND</code> (KIND optional; offsets 0–15)</span>
         </div>
         <textarea id="grassDataIn" spellcheck="false" placeholder="e.g.
 123 64 -20  7 7 7
@@ -151,7 +160,7 @@
           <div class="row">
             <label>Y min <input id="crackYMin" type="number" step="1" value="62" /></label>
             <label>Y max <input id="crackYMax" type="number" step="1" value="70" /></label>
-            <label class="inline"><input id="crackWorkers" type="checkbox" checked /> Use all CPU cores</label>
+            <label class="inline"><input id="crackWorkers" type="checkbox" checked /> Use multiple CPU cores</label>
             <button id="crackCoords" type="button">Crack coordinates</button>
             <span id="crackStatus" class="hint">Uses current grass blocks + offsets (no need to export).</span>
           </div>
@@ -165,6 +174,30 @@
     <main class="workspace" aria-label="Workspace">
       <div class="viewport" aria-label="Viewport (960×540)">
       <canvas id="view" width="960" height="540"></canvas>
+      <div class="foliage-picker" title="Choose which foliage type you are placing">
+        <label>Foliage
+          <select id="foliageSelect"></select>
+        </label>
+        <div id="bambooUvControls" class="variant-controls hidden" title="Bamboo UV shift (matches in-game random bamboo texture offsets)">
+          <label>Bamboo U
+            <input id="bambooUvU" type="number" min="0" max="15" step="1" value="0"/>
+          </label>
+          <label>Bamboo V
+            <input id="bambooUvV" type="number" min="0" max="15" step="1" value="0"/>
+          </label>
+        </div>
+        <div id="variantControls" class="variant-controls hidden">
+          <label id="heightLabel">Height
+            <input id="variantHeight" type="number" min="1" max="16" step="1" value="1"/>
+          </label>
+          <label id="dirLabel">Direction
+            <select id="variantDir">
+              <option value="up">up</option>
+              <option value="down">down</option>
+            </select>
+          </label>
+        </div>
+      </div>
       <div id="texIndicator" class="tex-indicator">Grass texture: Jappa</div>
       <div class="badge">
         <div><span class="swatch grid"></span> Grid (light gray)</div>
@@ -172,21 +205,25 @@
         <div><span class="swatch sel"></span> Selected grass</div>
       </div>
       </div>
-      <div class="workspace__hint">Scroll = zoom • Space + drag = pan • Right click = place mode • WASD/Arrows = move offset • DEL = delete selected</div>
+      <div class="workspace__hint">Scroll = zoom • Hold left click + drag = pan • Right click = place mode • 1/2 = switch grass texture • 3 = toggle tall grass • WASD/Arrows = move offset • DEL = delete selected</div>
       <div class="workspace__help">
         <div><b>Placement:</b> right click to start, move mouse to snap X/Z, use <b>R/F</b> for Y, right click again to confirm.</div>
-        <div><b>Selection:</b> left click a grass to select it (selection is rendered slightly brighter).</div>
+        <div><b>Selection:</b> left click a grass to select it (selection is highlighted in red).</div>
       </div>
     </main>
   </div>
 
   <footer class="repos" aria-label="Repositories">
     <div class="repos__title">Repositories used/referenced</div>
-    <a href="https://github.com/polymetric/mcah-manualgrass" target="_blank" rel="noreferrer">polymetric/mcah-manualgrass</a>
-    <a href="https://github.com/humhue/grassfinder" target="_blank" rel="noreferrer">humhue/grassfinder</a>
-    <a href="https://github.com/Gaider10/PerspectiveReverser" target="_blank" rel="noreferrer">Gaider10/PerspectiveReverser</a>
+    <a href="https://github.com/beachale/Grass-GUIpolymetric/mcah-manualgrass" target="_blank" rel="noreferrer">polymetric/mcah-manualgrass</a>
+    <a href="https://github.com/beachale/Grass-GUIhumhue/grassfinder" target="_blank" rel="noreferrer">humhue/grassfinder</a>
+    <a href="https://github.com/beachale/Grass-GUIGaider10/PerspectiveReverser" target="_blank" rel="noreferrer">Gaider10/PerspectiveReverser</a>
     <a href="https://fonts.google.com/specimen/Monda" target="_blank" rel="noreferrer">Google Fonts: Monda</a>
   </footer>
+
+  <a class="gpt-credit" href="https://github.com/beachale/Grass-GUIhumhue/grassfinder" target="_blank" rel="noreferrer" aria-label="Grassfinder GitHub">
+    Grassfinder code optimized by GPT
+  </a>
 
   <script type="module" src="./main.js"></script>
 </body>
