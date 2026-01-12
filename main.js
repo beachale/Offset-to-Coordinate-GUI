@@ -2927,7 +2927,7 @@ const GF = (() => {
   }){
     const rows = rowsFromGrasses();
     if (rows.length < 2) {
-      return { matches: [], warning: 'Add at least 2 grass blocks to crack coordinates.' };
+      return { matches: [], warning: 'Add at least 2 blocks to crack coordinates.' };
     }
 
     const mode = (matchMode === 'scored') ? 'scored' : 'strict';
@@ -3402,7 +3402,7 @@ window.addEventListener('keydown', (e) => {
   // Textures are loaded from the linked Minecraft assets repo now, so 1/2 are unused.
 
   // Quick toggle between short grass and tall grass (legacy hotkey).
-  if (!typing0 && e.key === '3') {
+  if (!typing0 && e.key === '') {
     setPlacementFoliage(activeFoliageId === 'TALL_GRASS' ? 'SHORT_GRASS' : 'TALL_GRASS');
     e.preventDefault();
     return;
