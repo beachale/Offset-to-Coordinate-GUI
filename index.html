@@ -20,6 +20,14 @@
 
       <details open>
         <summary>Camera / Overlay</summary>
+        <div class="row tp-row">
+          <label class="tp-label">
+            Teleport (/tp)
+            <input id="tpInput" type="text" spellcheck="false" placeholder="/tp @p 10 20 30 90 0" />
+          </label>
+          <button id="tpGo" type="button" title="Parse the /tp command and move the camera">Teleport</button>
+          <span id="tpMsg" class="hint" aria-live="polite"></span>
+        </div>
         <div class="row">
           <label>X <input id="camX" type="number" step="0.01" value="0" /></label>
           <label>Y <input id="camY" type="number" step="0.01" value="0" /></label>
@@ -187,6 +195,12 @@
           </label>
           <label>Bamboo V
             <input id="bambooUvV" type="number" min="0" max="15" step="1" value="0"/>
+          </label>
+          <label>Bamboo model
+            <select id="bambooModelSize">
+              <option value="2x2" selected>2×2</option>
+              <option value="3x3">3×3</option>
+            </select>
           </label>
         </div>
         <div id="variantControls" class="variant-controls hidden">

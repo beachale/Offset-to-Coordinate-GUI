@@ -375,6 +375,9 @@ scene.add(ground);
 const el = {
   viewport: document.querySelector('.viewport'),
   progArtToggle: document.getElementById('progArtToggle'),
+  tpInput: document.getElementById('tpInput'),
+  tpGo: document.getElementById('tpGo'),
+  tpMsg: document.getElementById('tpMsg'),
   camX: document.getElementById('camX'),
   camY: document.getElementById('camY'),
   useFeetY: document.getElementById('useFeetY'),
@@ -422,6 +425,7 @@ const el = {
   bambooUvControls: document.getElementById('bambooUvControls'),
   bambooUvU: document.getElementById('bambooUvU'),
   bambooUvV: document.getElementById('bambooUvV'),
+  bambooModelSize: document.getElementById('bambooModelSize'),
   variantControls: document.getElementById('variantControls'),
   variantHeight: document.getElementById('variantHeight'),
   variantDir: document.getElementById('variantDir'),
@@ -532,6 +536,77 @@ function nearlyInt(n, eps = 1e-9) {
 function fmt(n) {
   // Show integers without decimals; otherwise show 3 decimals like the readout.
   return nearlyInt(n) ? String(Math.round(n)) : n.toFixed(3);
+}
+
+// --- /tp helper (teleport camera by pasting a Minecraft-style /tp command) ---
+function setTpMsg(text, isError = false) {
+  if (!el.tpMsg) return;
+  el.tpMsg.textContent = String(text ?? '');
+  el.tpMsg.classList.toggle('tp-error', Boolean(isError));
+}
+
+function parseTpCommand(raw) {
+  const s = String(raw ?? '').replace(/\u00a0/g, ' ').trim();
+  if (!s) return { error: 'Enter a /tp command.' };
+
+  const parts = s.split(/\s+/);
+  if (parts.length === 0) return { error: 'Enter a /tp command.' };
+
+  const head = (parts[0] ?? '').toLowerCase();
+  if (head === '/tp' || head === 'tp') {
+    parts.shift();
+  } else {
+    return { error: 'Expected a command starting with /tp.' };
+  }
+
+  if (parts.length < 3) {
+    return { error: 'Expected: /tp [target] <x> <y> <z> [yaw] [pitch]' };
+  }
+
+  // Accept optional target selectors/playernames by skipping one leading non-number token.
+  let i = 0;
+  if (!Number.isFinite(Number(parts[0]))) i = 1;
+  if (parts.length < i + 3) return { error: 'Expected coordinates: x y z' };
+
+  const x = Number(parts[i]);
+  const y = Number(parts[i + 1]);
+  const z = Number(parts[i + 2]);
+  if (![x, y, z].every(Number.isFinite)) return { error: 'Invalid x/y/z in /tp command.' };
+
+  let yaw = null;
+  let pitch = null;
+
+  if (parts.length >= i + 5) {
+    yaw = Number(parts[i + 3]);
+    pitch = Number(parts[i + 4]);
+    if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return { error: 'Invalid yaw/pitch in /tp command.' };
+  } else if (parts.length === i + 4) {
+    yaw = Number(parts[i + 3]);
+    if (!Number.isFinite(yaw)) return { error: 'Invalid yaw in /tp command.' };
+  }
+
+  return { x, y, z, yaw, pitch };
+}
+
+function teleportFromTpInput() {
+  const parsed = parseTpCommand(el.tpInput?.value);
+  if (parsed?.error) {
+    setTpMsg(parsed.error, true);
+    return;
+  }
+
+  // Minecraft /tp uses entity position (feet). Map into the current Y input mode.
+  const feetMode = Boolean(el.useFeetY?.checked);
+  const yForUI = feetMode ? parsed.y : (parsed.y + EYE_HEIGHT);
+
+  el.camX.value = formatMcNumber(parsed.x);
+  el.camY.value = formatMcNumber(yForUI);
+  el.camZ.value = formatMcNumber(parsed.z);
+  if (parsed.yaw !== null) el.yaw.value = formatMcNumber(parsed.yaw);
+  if (parsed.pitch !== null) el.pitch.value = formatMcNumber(parsed.pitch);
+
+  updateCameraFromUI();
+  setTpMsg(`Teleported to ${formatMcNumber(parsed.x)} ${formatMcNumber(parsed.y)} ${formatMcNumber(parsed.z)}`, false);
 }
 
 // Overlay image state (drawn into the compositor canvas, never scaled)
@@ -842,6 +917,19 @@ function syncCamYDisplayToMode() {
   const yDisplay = feetMode ? (yEye - EYE_HEIGHT) : yEye;
   el.camY.value = fmt(yDisplay);
 }
+
+// /tp UI wiring
+el.tpGo?.addEventListener('click', teleportFromTpInput);
+el.tpInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    teleportFromTpInput();
+  }
+});
+el.tpInput?.addEventListener('input', () => {
+  // Clear stale errors as the user edits.
+  if ((el.tpMsg?.textContent ?? '') && el.tpMsg?.classList?.contains('tp-error')) setTpMsg('', false);
+});
 
 for (const k of ['camX','camY','camZ','yaw','pitch','fov']) {
   el[k].addEventListener('input', updateCameraFromUI);
@@ -1158,6 +1246,8 @@ let activeFoliageId = 'SHORT_GRASS';
 /** Bamboo texture UV shift (0..15 pixels). Vanilla bamboo chooses among different UV mappings/models. */
 let bambooUvU = 0; // 0..15
 let bambooUvV = 0; // 0..15
+let bambooModelSize = '2x2'; // '2x2' | '3x3'
+
 
 function isBamboo(id){ return String(id || '') === 'BAMBOO'; }
 
@@ -1165,6 +1255,7 @@ function showHideBambooUvControls(){
   if (!el.bambooUvControls) return;
   const show = isBamboo(activeFoliageId);
   el.bambooUvControls.classList.toggle('hidden', !show);
+  if (show && el.bambooModelSize) el.bambooModelSize.value = String(bambooModelSize || '2x2');
 }
 
 function clampInt(v, a, b){
@@ -1387,6 +1478,33 @@ el.bambooUvU?.addEventListener('input', () => {
 el.bambooUvV?.addEventListener('input', () => {
   bambooUvV = clampInt(el.bambooUvV.value, 0, 15);
   applyBambooUvToCachedMats();
+  if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
+});
+
+el.bambooModelSize?.addEventListener('change', () => {
+  bambooModelSize = String(el.bambooModelSize.value || '2x2');
+  // Rebuild any placed bamboo meshes so the change is visible immediately.
+  try {
+    for (const g of grasses.values()) {
+      if (g.kind !== 'BAMBOO') continue;
+      const mats = ensureFoliageMats('BAMBOO');
+      const isSel = (g.id === selectedId);
+      const mat = isSel ? mats.selected : mats.base;
+
+      const newMesh = makeBambooMesh(mat, g.variant?.height ?? 1);
+      newMesh.userData.__grassId = g.id;
+
+      grassGroup.remove(g.mesh);
+      grassGroup.add(newMesh);
+      g.mesh = newMesh;
+      updateGrassMeshTransform(g);
+    }
+    // Re-apply selection materials/tint to keep state consistent.
+    setSelected(selectedId);
+  } catch (_) {
+    // no-op
+  }
+
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
 });
 
@@ -2025,7 +2143,7 @@ function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
   const variant = getActiveVariantFor(foliageId);
 
   if (foliageId === 'BAMBOO') {
-    return makeBambooStackMesh(mats.placement, variant?.height ?? 1);
+    return makeBambooMesh(mats.placement, variant?.height ?? 1);
   }
   if (foliageId === 'POINTED_DRIPSTONE') {
     return makeDripstoneStackMesh(mats.placement, variant?.height ?? 1, variant?.dir ?? 'up');
@@ -2137,6 +2255,100 @@ function makeBambooStackMesh(mat, height=1){
   }
   return tagAsFoliagePart(root);
 }
+
+// --- Bamboo model size support (2×2 procedural or 3×3 via local JSON model) ---
+const LOCAL_BAMBOO_3X3_MODEL = {"textures":{"all":"block/bamboo_stalk","particle":"block/bamboo_stalk"},"elements":[{"from":[7,0,7],"to":[9,16,9],"faces":{"down":{"uv":[13,4,15,6],"texture":"#all","cullface":"down"},"up":{"uv":[13,0,15,2],"texture":"#all","cullface":"up"},"north":{"uv":[0,0,2,16],"texture":"#all"},"south":{"uv":[0,0,2,16],"texture":"#all"},"west":{"uv":[0,0,2,16],"texture":"#all"},"east":{"uv":[0,0,2,16],"texture":"#all"}}}]};
+let bamboo3x3ModelJsonPromise = Promise.resolve(LOCAL_BAMBOO_3X3_MODEL);
+function getLocalBamboo3x3ModelJSON(){
+  return bamboo3x3ModelJsonPromise;
+}
+
+function makeBambooMesh(mat, height=1){
+  return (String(bambooModelSize) === '3x3')
+    ? makeBamboo3x3StackMesh(mat, height)
+    : makeBambooStackMesh(mat, height);
+}
+
+// When we scale the vanilla 2×2 bamboo JSON element up to a 3×3 stalk, we must also widen the
+// UV rectangles so we sample a 3px-wide strip (instead of stretching a 2px strip across 3px).
+function adjustBamboo3x3ModelUVs(model){
+  if (!model || !Array.isArray(model.elements)) return model;
+
+  // Deep-clone so we don't mutate the cached/fetched JSON.
+  let m;
+  try { m = JSON.parse(JSON.stringify(model)); }
+  catch { return model; }
+
+  function widenUv(uv, wantW, wantH){
+    if (!Array.isArray(uv) || uv.length < 4) return;
+    const u0 = Number(uv[0]), v0 = Number(uv[1]), u1 = Number(uv[2]), v1 = Number(uv[3]);
+    if (!Number.isFinite(u0) || !Number.isFinite(v0) || !Number.isFinite(u1) || !Number.isFinite(v1)) return;
+    const w = u1 - u0;
+    const h = v1 - v0;
+
+    // Only adjust the common 2px-wide (and 2px-tall) rectangles used by the thin stalk.
+    // Keep the starting corner the same so the user's UV offset controls continue to work.
+    if (Math.abs(w - 2) < 1e-6) uv[2] = u0 + wantW;
+    if (wantH != null && Math.abs(h - 2) < 1e-6) uv[3] = v0 + wantH;
+  }
+
+  for (const elmt of m.elements) {
+    const faces = elmt?.faces;
+    if (!faces) continue;
+
+    // Side faces: widen to 3px, keep full-height.
+    for (const k of ['north','south','east','west']) {
+      if (faces[k]?.uv) widenUv(faces[k].uv, 3, null);
+    }
+
+    // Caps: widen + heighten to 3×3 if they're the 2×2 vanilla cap UVs.
+    for (const k of ['up','down']) {
+      if (faces[k]?.uv) widenUv(faces[k].uv, 3, 3);
+    }
+  }
+  return m;
+}
+
+function makeBamboo3x3StackMesh(mat, height=1){
+  const root = new THREE.Group();
+  const h = Math.max(1, Math.min(16, Math.trunc(height)));
+  root.userData.__isGrassPart = true;
+
+  (async () => {
+    const model = await getLocalBamboo3x3ModelJSON();
+    if (!model) return;
+
+    const uvFixedModel = adjustBamboo3x3ModelUVs(model);
+
+    // Remove any old children and rebuild.
+    while (root.children.length) {
+      const c = root.children.pop();
+      if (c) root.remove(c);
+    }
+
+    // Build one segment from the provided JSON model, then clone it for each height level.
+    const seg = buildMinecraftModelGroup(uvFixedModel, mat);
+
+    // Scale only XZ to turn the 2×2 post into a 3×3 post, keeping it centered in the block.
+    const pivot = new THREE.Group();
+    pivot.position.set(0.5, 0, 0.5);
+    seg.position.set(-0.5, 0, -0.5);
+    pivot.add(seg);
+    pivot.scale.set(1.5, 1, 1.5);
+
+    for (let i=0;i<h;i++){ 
+      const part = pivot.clone(true);
+      part.position.set(0.5, i, 0.5);
+      root.add(part);
+    }
+
+    // If selection changed while the async model was loading, re-apply selection materials now.
+    try { setSelected(selectedId); } catch (_) {}
+  })();
+
+  return tagAsFoliagePart(root);
+}
+
 
 
 // Pointed dripstone: use the vanilla model approach (two crossed planes) with the correct per-segment textures.
@@ -2348,7 +2560,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   let mesh;
   const variant = getActiveVariantFor(kind);
   if (kind === 'BAMBOO') {
-    mesh = makeBambooStackMesh(mats.base, variant?.height ?? 1);
+    mesh = makeBambooMesh(mats.base, variant?.height ?? 1);
   } else if (kind === 'POINTED_DRIPSTONE') {
     mesh = makeDripstoneStackMesh(mats.base, variant?.height ?? 1, variant?.dir ?? 'up');
   } else if (kind === 'MANGROVE_PROPAGULE') {
@@ -3234,7 +3446,9 @@ function ensurePlacementOffsetRules(){
 
 function ensurePlacementPreview(){
   const previewKey = foliageSupportsHeight(activeFoliageId)
-    ? `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}`
+    ? (activeFoliageId === 'BAMBOO'
+        ? `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}|${bambooModelSize}`
+        : `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}`)
     : (activeFoliageId === 'MANGROVE_PROPAGULE'
         ? `${activeFoliageId}|${activePropaguleModel}`
         : activeFoliageId);
