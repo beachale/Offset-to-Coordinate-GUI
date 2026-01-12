@@ -1,0 +1,15 @@
+{
+  "name": "grassfinder_wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "grassfinder_wasm_bg.wasm",
+    "grassfinder_wasm.js",
+    "grassfinder_wasm.d.ts"
+  ],
+  "main": "grassfinder_wasm.js",
+  "types": "grassfinder_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

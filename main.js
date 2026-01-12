@@ -2970,162 +2970,10 @@ const GF = (() => {
       packed: ((g.off.x|0) | ((g.off.y|0) << 4) | ((g.off.z|0) << 8)) >>> 0,
     }));
   }
-
   // --- Worker implementation (optional) ---
-  let workerURL = null;
-
+  // External module worker (WASM-backed). Create ./grassfinder_worker.js next to main.js.
   function getWorkerURL(){
-    if (workerURL) return workerURL;
-
-    const src = `
-      // Vanilla formula (b1.7.3 BlockRenderer / later MathHelper):
-      //   long l = (x*3129871) ^ (z*116129781L) ^ y;
-      //   l = l*l*42317861L + l*11L;
-      // Offsets use bits 16..27 of l.
-      //
-      // Those bits live in the low 32 bits, and the low 32 bits depend only on the low 32 bits
-      // of intermediate results. So we can compute the packed offset using fast 32-bit Math.imul
-      // instead of BigInt-heavy 64-bit math.
-      const X_MULT = ${X_MULT} | 0;
-      const Z_MULT = ${Z_MULT} | 0;
-      const LCG_MULT = ${LCG_MULT} | 0;
-      const LCG_ADDEND = ${LCG_ADDEND} | 0;
-
-      function packedGrassOffset(x, y, z, version){
-        const yy = (version === 'post1_12') ? 0 : (y | 0);
-
-        // Java (BlockState.getOffset / AbstractBlock.getOffset):
-        //   long l = (x*3129871L) ^ (z*116129781L) ^ y;
-        //   l = l*l*42317861L + l*11L;
-        let l = (BigInt(x | 0) * BigInt(X_MULT)) ^ (BigInt(z | 0) * BigInt(Z_MULT)) ^ BigInt(yy);
-        l = BigInt.asIntN(64, l);
-        l = BigInt.asIntN(64, (l * l * BigInt(LCG_MULT)) + (l * BigInt(LCG_ADDEND)));
-        const u = BigInt.asUintN(64, l);
-
-        // Bits 16..27 contain three 4-bit nibbles (ox | oy<<4 | oz<<8).
-        return Number((u >> 16n) & 0xFFFn) >>> 0;
-      }
-
-      // Score a predicted packed offset against an expected packed offset.
-      // mask is a 12-bit nibble mask: if an axis nibble is 0, that axis is ignored.
-      function dripstoneNibbleDistance(pred, expected){
-        const p = pred & 15;
-        const e = expected & 15;
-        if (e <= 3) { if (p <= 3) return 0; return p - 3; }
-        if (e >= 12) { if (p >= 12) return 0; return 12 - p; }
-        return Math.abs(p - e);
-      }
-
-      function dripstoneNibbleMatches(pred, expected){
-        const p = pred & 15;
-        const e = expected & 15;
-        if (e <= 3) return p <= 3;
-        if (e >= 12) return p >= 12;
-        return p === e;
-      }
-
-      function strictMatch(predPacked, expectedPacked, mask, isDrip){
-        if (!isDrip) return ((predPacked & mask) === expectedPacked);
-        for (let axis = 0; axis < 3; axis++) {
-          const nibMask = (mask >> (axis * 4)) & 15;
-          if (nibMask === 0) continue;
-          const p = (predPacked >> (axis * 4)) & 15;
-          const e = (expectedPacked >> (axis * 4)) & 15;
-          if (axis === 1) { if (p !== e) return false; }
-          else { if (!dripstoneNibbleMatches(p, e)) return false; }
-        }
-        return true;
-      }
-
-      function scorePacked(predPacked, expectedPacked, mask, tol, isDrip){
-        let score = 0;
-        const drip = !!isDrip;
-        for (let axis = 0; axis < 3; axis++) {
-          const nibMask = (mask >> (axis * 4)) & 15;
-          if (nibMask === 0) continue;
-          const p = (predPacked >> (axis * 4)) & 15;
-          const e = (expectedPacked >> (axis * 4)) & 15;
-          const d = (drip && axis !== 1) ? dripstoneNibbleDistance(p, e) : Math.abs(p - e);
-          if (d <= tol) score += d;
-          else score += d * d;
-        }
-        return score;
-      }
-
-      onmessage = (e) => {
-        const { jobId, x0, x1, z0, z1, y0, y1, version, relDx, relDy, relDz, relPacked, relMask, relDrip, maxMatches, post1_12_anyY, mode, tol, maxScore } = e.data;
-        const relLen = ((relPacked && relPacked.length) | 0);
-        const matches = [];
-        let done = 0;
-        const xCount = (x1 - x0 + 1);
-        const zCount = (z1 - z0 + 1);
-        const yCount = post1_12_anyY ? 1 : (y1 - y0 + 1);
-        const total = xCount * zCount * yCount;
-
-        const emitEvery = 250000;
-
-        function checkAt(x, y, z){
-          let score = 0;
-          for (let i=0;i<relLen;i++){
-            const ax = x + relDx[i];
-            const ay = y + relDy[i];
-            const az = z + relDz[i];
-            const p = packedGrassOffset(ax, ay, az, version);
-
-            if (mode === 'strict') {
-              if (!strictMatch(p, relPacked[i], relMask[i], relDrip && relDrip[i])) return -1;
-            } else {
-              score += scorePacked(p, relPacked[i], relMask[i], tol|0, relDrip && relDrip[i]);
-              if (score > (maxScore|0)) return -1;
-            }
-          }
-          return score|0;
-        }
-
-        if (post1_12_anyY){
-          // y does not affect offsets; scan X/Z only (huge speedup)
-          const y = y0; // representative
-          for (let z=z0; z<=z1; z++){
-            for (let x=x0; x<=x1; x++){
-              const s = checkAt(x, y, z);
-              if (s >= 0){
-                if (mode === 'scored') matches.push({x, y, z, score:s});
-                else matches.push({x, y, z});
-                if (matches.length >= maxMatches){
-                  postMessage({ jobId, type:'done', done: total, total, matches, hitCap:true });
-                  return;
-                }
-              }
-              done++;
-              if ((done % emitEvery) === 0) postMessage({ jobId, type:'progress', done, total, matchesCount: matches.length });
-            }
-          }
-        } else {
-          for (let y=y0; y<=y1; y++){
-            for (let z=z0; z<=z1; z++){
-              for (let x=x0; x<=x1; x++){
-                const s = checkAt(x, y, z);
-                if (s >= 0){
-                  if (mode === 'scored') matches.push({x, y, z, score:s});
-                  else matches.push({x, y, z});
-                  if (matches.length >= maxMatches){
-                    postMessage({ jobId, type:'done', done: total, total, matches, hitCap:true });
-                    return;
-                  }
-                }
-                done++;
-                if ((done % emitEvery) === 0) postMessage({ jobId, type:'progress', done, total, matchesCount: matches.length });
-              }
-            }
-          }
-        }
-
-        postMessage({ jobId, type:'done', done, total, matches, hitCap:false });
-      };
-    `;
-
-    workerURL = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-    return workerURL;
+    return new URL('./grassfinder_worker.js', import.meta.url);
   }
 
   async function crack({
@@ -3232,7 +3080,7 @@ const GF = (() => {
       }
 
       const promises = stripes.map((s, idx) => new Promise((resolve, reject) => {
-        const w = new Worker(url, { type: 'classic' });
+        const w = new Worker(url, { type: 'module' });
         workers.push(w);
 
         w.onmessage = (ev) => {
