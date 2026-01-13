@@ -1059,32 +1059,58 @@ function fixAnimatedStripTexture(tex){
   }catch(_){}
 }
 
-// A tiny placeholder so meshes render immediately while textures stream in.
+// A tiny placeholder so meshes don't flash white while textures stream in.
+// Fully transparent (1x1) so cutout geometry stays invisible until the real texture is ready.
 function makePlaceholderTexture(){
-  const data = new Uint8Array([255, 255, 255, 255]); // 1x1 white
+  const data = new Uint8Array([0, 0, 0, 0]); // 1x1 transparent
   const t = new THREE.DataTexture(data, 1, 1);
   configureMcTexture(t);
-      fixAnimatedStripTexture(t);
-applyAnimatedStripFix(t);
   return t;
 }
 
-function applyAnimatedStripFix(tex){
-  try {
-    const img = tex && tex.image;
-    if (!img || !img.width || !img.height) return;
-    if (img.width === 16 && img.height > 16 && (img.height % 16) === 0) {
-      const frames = img.height / 16;
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(1, 1 / frames);
-      tex.offset.set(0, 1 - tex.repeat.y);
-      tex.needsUpdate = true;
-    }
-  } catch(e){}
+const PLACEHOLDER_TEX = makePlaceholderTexture();
+
+// Small UX polish: fade meshes in once their texture arrives (avoids harsh pop-in).
+function fadeMaterialOpacity(mat, targetOpacity = 1, ms = 120){
+  if (!mat) return;
+  const from = Number.isFinite(mat.opacity) ? mat.opacity : 1;
+  const start = performance.now();
+  mat.transparent = true;
+
+  function step(now){
+    const k = Math.min(1, (now - start) / ms);
+    mat.opacity = from + (targetOpacity - from) * k;
+    if (k < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
 }
 
-const PLACEHOLDER_TEX = makePlaceholderTexture();
+function hideMaterialForLoad(mat){
+  if (!mat) return;
+  if (!mat.userData) mat.userData = {};
+  // Record the intended opacity so we can restore it after the texture arrives.
+  mat.userData.__targetOpacity = Number.isFinite(mat.opacity) ? mat.opacity : 1;
+  mat.opacity = 0;
+  mat.transparent = true;
+}
+
+function revealMaterialAfterLoad(mat, ms = 120){
+  if (!mat) return;
+  const target = (mat.userData && Number.isFinite(mat.userData.__targetOpacity)) ? mat.userData.__targetOpacity : 1;
+  fadeMaterialOpacity(mat, target, ms);
+}
+
+// If a material was previously hidden with `hideMaterialForLoad`, its visible `opacity` is 0
+// but the *intended* opacity is stored in userData.__targetOpacity. This matters when we
+// clone a hidden material (e.g. pointed dripstone segments): the clone would otherwise inherit
+// opacity=0 and then get "stuck" invisible.
+function intendedOpacityOf(mat, fallback = 1){
+  const ud = mat && mat.userData;
+  if (ud && Number.isFinite(ud.__targetOpacity)) return ud.__targetOpacity;
+  if (mat && Number.isFinite(mat.opacity) && mat.opacity > 0) return mat.opacity;
+  return fallback;
+}
+
 
 // Cache textures by name (e.g. 'fern', 'tall_grass_bottom').
 const textureCache = new Map();
@@ -1146,23 +1172,31 @@ const modelJsonCache = new Map();
 async function getBlockTexture(texName){
   const key = String(texName || '').trim();
   if (!key) return PLACEHOLDER_TEX;
-  if (textureCache.has(key)) return textureCache.get(key);
 
-  // Insert placeholder immediately to avoid thundering-herd loads.
-  textureCache.set(key, PLACEHOLDER_TEX);
+  // IMPORTANT: we may have *in-flight* loads.
+  // Older code cached PLACEHOLDER_TEX immediately, which made any concurrent callers
+  // permanently receive the placeholder (they would never await the real texture).
+  // To fix this, we cache the *Promise* for the load. Awaiting a non-Promise value
+  // still works, so callers can safely `await getBlockTexture(...)` either way.
+  if (textureCache.has(key)) return await textureCache.get(key);
+
   const url = blockTextureUrl(key);
+  const p = (async () => {
+    try {
+      const t = await texLoader.loadAsync(url);
+      configureMcTexture(t);
+      fixAnimatedStripTexture(t);
+      textureCache.set(key, t);
+      return t;
+    } catch (e) {
+      console.warn('Failed to load texture', { key, url }, e);
+      textureCache.set(key, PLACEHOLDER_TEX);
+      return PLACEHOLDER_TEX;
+    }
+  })();
 
-  try {
-    const t = await texLoader.loadAsync(url);
-    configureMcTexture(t);
-    fixAnimatedStripTexture(t);
-    textureCache.set(key, t);
-    return t;
-  } catch (e) {
-    console.warn('Failed to load texture', { key, url }, e);
-    textureCache.set(key, PLACEHOLDER_TEX);
-    return PLACEHOLDER_TEX;
-  }
+  textureCache.set(key, p);
+  return await p;
 }
 
 function getBlockModelJSON(modelName){
@@ -1484,6 +1518,7 @@ function setPlacementFoliage(id){
     ensurePlacementPreview();
     const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
     placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
+  updatePlacementPreviewBlockedState();
   }
 }
 
@@ -1730,12 +1765,15 @@ function ensureFoliageMats(id){
     };
     foliageMatCache.set(key, mats);
 
+    // Hide placeholder until textures arrive (prevents white flash during streaming).
+    for (const m of [baseBottom, baseTop, selectedBottom, selectedTop, placementBottom, placementTop]) hideMaterialForLoad(m);
+
     // Async load actual textures + apply to all mats.
     (async () => {
       const bt = await getBlockTexture(mats.__texBottom);
       const tt = await getBlockTexture(mats.__texTop);
-      for (const m of [baseBottom, selectedBottom, placementBottom]) { m.map = bt; m.needsUpdate = true; }
-      for (const m of [baseTop, selectedTop, placementTop]) { m.map = tt; m.needsUpdate = true; }
+      for (const m of [baseBottom, selectedBottom, placementBottom]) { m.map = bt; m.needsUpdate = true; revealMaterialAfterLoad(m); }
+      for (const m of [baseTop, selectedTop, placementTop]) { m.map = tt; m.needsUpdate = true; revealMaterialAfterLoad(m); }
     })();
 
     return mats;
@@ -1758,6 +1796,9 @@ function ensureFoliageMats(id){
   const mats = { model: 'single', base, selected, placement, __tex: names.single };
   foliageMatCache.set(key, mats);
 
+  // Hide placeholder until texture arrives.
+  for (const m of [base, selected, placement]) hideMaterialForLoad(m);
+
   (async () => {
     const t0 = await getBlockTexture(mats.__tex);
 
@@ -1768,7 +1809,7 @@ function ensureFoliageMats(id){
       applyBambooUvToTexture(t);
     }
 
-    for (const m of [base, selected, placement]) { m.map = t; m.needsUpdate = true; }
+    for (const m of [base, selected, placement]) { m.map = t; m.needsUpdate = true; revealMaterialAfterLoad(m); }
   })();
 
 return mats;
@@ -1800,6 +1841,9 @@ function ensurePropaguleMats(variantKey){
   const mats = { model: 'propagule', base, selected, placement, __tex: propaguleModelToTextureName(v), __variant: v };
   foliageMatCache.set(cacheKey, mats);
 
+  // Hide placeholder until texture arrives.
+  for (const m of [base, selected, placement]) hideMaterialForLoad(m);
+
   (async () => {
     // Prefer the texture referenced by the model JSON itself (more robust than manual mapping).
     const modelName = propaguleModelToBlockModelName(v);
@@ -1807,7 +1851,7 @@ function ensurePropaguleMats(variantKey){
     const inferred = textureNameFromMcModel(model);
     const texKey = inferred || mats.__tex;
     const t = await getBlockTexture(texKey);
-    for (const m of [base, selected, placement]) { m.map = t; m.needsUpdate = true; }
+    for (const m of [base, selected, placement]) { m.map = t; m.needsUpdate = true; revealMaterialAfterLoad(m); }
   })();
 
   return mats;
@@ -1932,6 +1976,7 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
     const m = material.clone();
     m.map = PLACEHOLDER_TEX;
     m.needsUpdate = true;
+    hideMaterialForLoad(m);
     // Carry selection tint metadata so special-case selection logic can work.
     m.userData.__mcTexName = texName;
     perFaceMatCache.set(texName, m);
@@ -1940,6 +1985,7 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
       const t = await getBlockTexture(texName);
       m.map = t;
       m.needsUpdate = true;
+      revealMaterialAfterLoad(m);
     })();
 
     return m;
@@ -2060,6 +2106,7 @@ function makeAsyncMinecraftModelMesh(modelName, material, opts = undefined){
 
 function makeGrassMesh(mat){
   const mtl = mat ?? makePlantMaterial(PLACEHOLDER_TEX);
+  if (!mat) hideMaterialForLoad(mtl);
   const root = new THREE.Group();
 
   for (const elmt of (grassModel.elements ?? [])) {
@@ -2172,7 +2219,8 @@ function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
     return makeBambooMesh(mats.placement, variant?.height ?? 1);
   }
   if (foliageId === 'POINTED_DRIPSTONE') {
-    return makeDripstoneStackMesh(mats.placement, variant?.height ?? 1, variant?.dir ?? 'up');
+    // In placement mode we want a visible preview even while textures are still streaming.
+    return makeDripstoneStackMesh(mats.placement, variant?.height ?? 1, variant?.dir ?? 'up', { preview: true });
   }
 
   if (foliageId === 'MANGROVE_PROPAGULE') {
@@ -2387,10 +2435,13 @@ function makeBamboo3x3StackMesh(mat, height=1){
 //  - h=3: base + frustum + tip
 //  - h>=4: base + middle*(h-3) + frustum + tip
 
-function makeDripstoneStackMesh(baseMat, height=1, dir='up'){
+function makeDripstoneStackMesh(baseMat, height=1, dir='up', opts = {}){
   const root = new THREE.Group();
   const h = Math.max(1, Math.min(16, Math.trunc(height)));
   const d = (dir === 'down') ? 'down' : 'up';
+
+  const isPreview = !!(opts && opts.preview);
+  const baseTargetOpacity = intendedOpacityOf(baseMat, 1);
 
   // Bottom-to-top segment texture names in the assets repo.
   function segListUp(hh){
@@ -2414,7 +2465,22 @@ function makeDripstoneStackMesh(baseMat, height=1, dir='up'){
   for (let i=0;i<texNames.length;i++){
     // Clone material per segment so each can have its own map.
     const mat = baseMat.clone();
-    mat.map = PLACEHOLDER_TEX;
+    // IMPORTANT: baseMat may be "hidden" (opacity=0) while its own texture is loading.
+    // If we clone it as-is, the clone inherits opacity=0 and ends up permanently invisible.
+    // Use the intended opacity (captured in baseMat.userData.__targetOpacity) instead.
+    mat.opacity = baseTargetOpacity;
+    mat.transparent = true;
+
+    if (isPreview) {
+      // For placement preview: don't apply the transparent placeholder map + opacity=0 hide.
+      // Show a simple tinted silhouette immediately, then swap in the real texture when it arrives.
+      mat.map = null;
+    } else {
+      // For placed meshes: hide until the real texture arrives to avoid flashing placeholders.
+      mat.map = PLACEHOLDER_TEX;
+      hideMaterialForLoad(mat);
+    }
+
     mat.needsUpdate = true;
 
     const seg = makeGrassMesh(mat); // crossed planes (same geometry as foliage)
@@ -2425,6 +2491,7 @@ function makeDripstoneStackMesh(baseMat, height=1, dir='up'){
       const t = await getBlockTexture(texNames[i]);
       mat.map = t;
       mat.needsUpdate = true;
+      if (!isPreview) revealMaterialAfterLoad(mat);
     })();
   }
 
@@ -2441,6 +2508,27 @@ let selectedId = null;
 let activeBlock = new THREE.Vector3(0, 0, 0);
 
 function keyForBlock(b){ return `${b.x}|${b.y}|${b.z}`; }
+
+/** Block occupancy map: at most one placed texture per 1×1×1 block cell. */
+/** @type {Map<string, number>} */
+const occupiedByBlock = new Map();
+
+/**
+ * Returns the id of the placed texture occupying this block, or null if free.
+ * @param {THREE.Vector3} block
+ * @param {{excludeId?: (number|null)}} [opts]
+ */
+function occupantAtBlock(block, opts = {}){
+  const excludeId = (opts && Number.isFinite(opts.excludeId)) ? opts.excludeId : null;
+  const id = occupiedByBlock.get(keyForBlock(block));
+  if (id == null) return null;
+  if (excludeId != null && id === excludeId) return null;
+  return id;
+}
+
+function isBlockFree(block, opts = {}){
+  return occupantAtBlock(block, opts) == null;
+}
 function grassLabel(g){
   const b = g.block;
   const o = g.off;
@@ -2572,6 +2660,8 @@ function refreshGrassList(){
 }
 
 function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
+  const bKey = keyForBlock(block);
+  if (occupiedByBlock.has(bKey)) return null;
   const id = nextId++;
   const kind = FOLIAGE.byId.has(foliageId) ? foliageId : 'SHORT_GRASS';
   const def = FOLIAGE.byId.get(kind);
@@ -2608,6 +2698,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   const g = { id, kind, block: block.clone(), off: { ...fixedOff }, mesh, variant: getActiveVariantFor(kind) };
   if (kind === 'MANGROVE_PROPAGULE') g.propaguleModel = String(activePropaguleModel || 'ground');
   grasses.set(id, g);
+  occupiedByBlock.set(bKey, id);
 
   // Ensure correct materials if this is the first selection.
   updateGrassMeshTransform(g);
@@ -2619,10 +2710,23 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
 function removeGrass(id){
   const g = grasses.get(id);
   if (!g) return;
+
+  // Release the 1×1×1 block occupancy so something else can be placed here.
+  // Guard against rare state mismatches (e.g., if something overwrote the map).
+  const k = keyForBlock(g.block);
+  if (occupiedByBlock.get(k) === id) {
+    occupiedByBlock.delete(k);
+  } else {
+    // Fallback: remove any entry that points to this id.
+    for (const [kk, vv] of occupiedByBlock.entries()) {
+      if (vv === id) { occupiedByBlock.delete(kk); break; }
+    }
+  }
   grassGroup.remove(g.mesh);
   grasses.delete(id);
   if (selectedId === id) selectedId = null;
   refreshGrassList();
+  if (placementMode) updatePlacementPreviewBlockedState();
   // pick a new selection if any remain
   const first = grasses.values().next().value;
   if (first) setSelected(first.id);
@@ -2631,8 +2735,10 @@ function removeGrass(id){
 function clearAllGrass(){
   for (const id of [...grasses.keys()]) removeGrass(id);
   grasses.clear();
+  occupiedByBlock.clear();
   selectedId = null;
   refreshGrassList();
+  if (placementMode) updatePlacementPreviewBlockedState();
 }
 
 // --- Offset UI apply ---
@@ -2666,19 +2772,46 @@ function applyOffsetsFromUI({syncUI=true} = {}){
 }
 
 // --- Selected grass block position UI ---
+
 function applySelectedBlockFromUI({syncUI=true} = {}){
   if (selectedId == null) return;
   const g = grasses.get(selectedId);
   if (!g) return;
 
-  g.block.x = Math.trunc(num(el.selBlockX.value, g.block.x));
-  g.block.y = Math.trunc(num(el.selBlockY.value, g.block.y));
-  g.block.z = Math.trunc(num(el.selBlockZ.value, g.block.z));
+  const oldX = g.block.x, oldY = g.block.y, oldZ = g.block.z;
+  const oldKey = keyForBlock(g.block);
+
+  const nx = Math.trunc(num(el.selBlockX.value, oldX));
+  const ny = Math.trunc(num(el.selBlockY.value, oldY));
+  const nz = Math.trunc(num(el.selBlockZ.value, oldZ));
+  const newKey = `${nx}|${ny}|${nz}`;
+
+  if (newKey !== oldKey) {
+    const occ = occupiedByBlock.get(newKey);
+    if (occ != null && occ !== g.id) {
+      showPlacementMsg(`Block (${nx}, ${ny}, ${nz}) is already occupied (#${occ}).`);
+      if (syncUI) {
+        el.selBlockX.value = String(oldX);
+        el.selBlockY.value = String(oldY);
+        el.selBlockZ.value = String(oldZ);
+      }
+      if (placementMode) updatePlacementPreviewBlockedState();
+      return;
+    }
+    occupiedByBlock.delete(oldKey);
+    occupiedByBlock.set(newKey, g.id);
+  }
+
+  g.block.x = nx;
+  g.block.y = ny;
+  g.block.z = nz;
 
   updateGrassMeshTransform(g);
   refreshGrassList();
   if (syncUI) setSelected(selectedId);
+  if (placementMode) updatePlacementPreviewBlockedState();
 }
+
 
 // Button (kept for parity with your old workflow)
 el.applyOffsets.addEventListener('click', () => applyOffsetsFromUI());
@@ -2774,12 +2907,14 @@ el.loadGrassData.addEventListener('click', () => {
     const rows = parseGrassDataStrict(el.grassDataIn.value);
     el.exportBox.value = '';
     clearAllGrass();
+    let skipped = 0;
     for (const r of rows){
       const prevProp = activePropaguleModel;
       if (r.kind === 'MANGROVE_PROPAGULE') {
         activePropaguleModel = String(r.propaguleModel || 'ground');
       }
-      addGrass(new THREE.Vector3(r.bx, r.by, r.bz), {x:r.ox, y:r.oy, z:r.oz}, r.kind);
+            const placed = addGrass(new THREE.Vector3(r.bx, r.by, r.bz), {x:r.ox, y:r.oy, z:r.oz}, r.kind);
+      if (placed == null) skipped++;
       activePropaguleModel = prevProp;
     }
     // select first grass and set active block
@@ -2788,7 +2923,9 @@ el.loadGrassData.addEventListener('click', () => {
       activeBlock.copy(first.block);
       setSelected(first.id);
     }
-    el.crackStatus.textContent = `Loaded ${rows.length} grass entries.`;
+    el.crackStatus.textContent = skipped
+      ? `Loaded ${rows.length - skipped} of ${rows.length} entries (${skipped} skipped: block already occupied).`
+      : `Loaded ${rows.length} grass entries.`;
   }catch(err){
     console.error(err);
     el.crackStatus.textContent = String(err?.message || err);
@@ -3313,6 +3450,82 @@ let placementBlock = new THREE.Vector3(0, 0, 0);
 let placementPreview = null;
 const placementOff = { x: 7, y: 7, z: 7 };
 
+let placementPreviewBlocked = false;
+
+/** Small on-canvas placement message (non-blocking). */
+function showPlacementMsg(text, ms = 1600){
+  try{
+    if (!el.viewport) { console.warn(text); return; }
+    if (!el.__placementMsgEl){
+      // Ensure the viewport is a positioned container.
+      const cs = getComputedStyle(el.viewport);
+      if (cs.position === 'static') el.viewport.style.position = 'relative';
+
+      const d = document.createElement('div');
+      d.id = 'placementMsg';
+      d.style.position = 'absolute';
+      d.style.left = '10px';
+      d.style.bottom = '10px';
+      d.style.padding = '6px 10px';
+      d.style.borderRadius = '10px';
+      d.style.background = 'rgba(0,0,0,0.65)';
+      d.style.color = 'white';
+      d.style.fontSize = '12px';
+      d.style.fontWeight = '600';
+      d.style.pointerEvents = 'none';
+      d.style.zIndex = '20';
+      d.style.display = 'none';
+      el.viewport.appendChild(d);
+      el.__placementMsgEl = d;
+      el.__placementMsgTimer = null;
+    }
+    const d = el.__placementMsgEl;
+    d.textContent = String(text ?? '');
+    d.style.display = 'block';
+    if (el.__placementMsgTimer) clearTimeout(el.__placementMsgTimer);
+    el.__placementMsgTimer = setTimeout(() => { d.style.display = 'none'; }, ms);
+  }catch(e){
+    console.warn('showPlacementMsg failed', e);
+  }
+}
+
+function setPlacementPreviewBlocked(blocked){
+  placementPreviewBlocked = !!blocked;
+  if (!placementPreview) return;
+  placementPreview.traverse(obj => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const m of mats){
+      if (!m || !m.color) continue;
+      if (!m.userData) m.userData = {};
+      if (m.userData.__origColorHex == null) m.userData.__origColorHex = m.color.getHex();
+      // IMPORTANT: our global "hide while loading" logic sets opacity=0 until the real texture arrives.
+      // If we snapshot __origOpacity during that hidden phase, the placement preview can get stuck
+      // invisible the next time we toggle blocked/unblocked. Use the *intended* opacity instead.
+      if (m.userData.__origOpacity == null) {
+        const intended = intendedOpacityOf(m, 1);
+        m.userData.__origOpacity = (Number.isFinite(intended) && intended > 0) ? intended : 1;
+      }
+
+      if (placementPreviewBlocked) {
+        m.color.setHex(0xff4b4b);
+        m.opacity = clamp(m.userData.__origOpacity * 0.65, 0, 1);
+        m.transparent = true;
+      } else {
+        m.color.setHex(m.userData.__origColorHex);
+        m.opacity = m.userData.__origOpacity;
+      }
+      m.needsUpdate = true;
+    }
+  });
+}
+
+function updatePlacementPreviewBlockedState(){
+  const occ = occupantAtBlock(placementBlock);
+  setPlacementPreviewBlocked(occ != null);
+}
+
+
 function ensurePlacementOffsetRules(){
   // XZ-only foliage cannot be Y-offset.
   if (isYOffsetLocked(activeFoliageId)) placementOff.y = 15;
@@ -3342,6 +3555,7 @@ function ensurePlacementPreview(){
   placementPreview.userData.__previewKey = previewKey;
   placementPreview.userData.__previewFoliageId = activeFoliageId;
   scene.add(placementPreview);
+  updatePlacementPreviewBlockedState();
 }
 
 
@@ -3396,6 +3610,7 @@ function updatePlacementPreviewFromEvent(e){
     const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
     placementPreview.position.set(b.x + off.x, b.y + off.y, b.z + off.z);
   }
+  updatePlacementPreviewBlockedState();
 }
 
 function enterPlacementMode(startY){
@@ -3407,6 +3622,7 @@ function enterPlacementMode(startY){
   placementPreview.visible = true;
   const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
   placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
+  updatePlacementPreviewBlockedState();
 }
 
 function computeBlockInFrontOfCameraSameY(){
@@ -3433,6 +3649,7 @@ function enterPlacementModeAtBlock(startBlock){
   placementPreview.visible = true;
   const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
   placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
+  updatePlacementPreviewBlockedState();
 }
 
 function exitPlacementMode(){
@@ -3458,9 +3675,17 @@ viewCanvas.addEventListener('mousedown', (e) => {
     if (placementMode) {
       const block = placementBlock.clone();
       activeBlock.copy(block);
-      addGrass(block, { ...placementOff });
-      exitPlacementMode();
-      return;
+      
+const placed = addGrass(block, { ...placementOff });
+if (placed == null) {
+  const occ = occupantAtBlock(block);
+  if (occ != null) showPlacementMsg(`Block (${block.x}, ${block.y}, ${block.z}) is occupied (#${occ}). Delete/move it first.`);
+  else showPlacementMsg('Cannot place here.');
+  updatePlacementPreviewBlockedState();
+  return;
+}
+exitPlacementMode();
+return;
     }
 
     // Otherwise: enter placement mode.
