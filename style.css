@@ -500,8 +500,12 @@ footer.disclaimer{
   pointer-events: auto;
   user-select: none;
   font-size: 12px;
+  display:flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
-.canvas-topright .toggle.progart{
+.canvas-topright .toggle{
   background: rgba(20,20,20,0.75);
   border: 1px solid rgba(255,255,255,0.12);
   padding: 6px 10px;
@@ -510,6 +514,7 @@ footer.disclaimer{
   align-items: center;
   gap: 8px;
 }
-.canvas-topright .toggle.progart input{
+.canvas-topright .toggle input{
   transform: translateY(1px);
 }
+

@@ -46,6 +46,7 @@ const PROGRAMMER_ART_URLS = Object.freeze({
 
 const PROGRAMMER_ART_KEYS = new Set(Object.keys(PROGRAMMER_ART_URLS));
 let useProgrammerArt = false;
+let useMSAA = true; // WebGLRenderer antialias (MSAA)
 
 function blockTextureUrl(key){
   const k = String(key || '').trim();
@@ -195,11 +196,22 @@ viewCanvas.addEventListener('pointerdown', () => {
   }
 });
 
-const webglCanvas = document.createElement('canvas');
+let webglCanvas = document.createElement('canvas');
 // preserveDrawingBuffer allows drawImage(webglCanvas, ...) reliably.
-const renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+let renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: useMSAA, alpha: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1); // render is in workspace pixels; keep literal
 renderer.setClearColor(0x000000, 0);
+
+function rebuildRenderer(){
+  const old = renderer;
+  // New canvas/context is required because MSAA is decided at WebGL context creation.
+  webglCanvas = document.createElement('canvas');
+  renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: useMSAA, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  try { resizeWebGL(); } catch (_) { /* resizeWebGL not ready yet during early init */ }
+  try { old?.dispose?.(); } catch (_) {}
+}
 const scene = new THREE.Scene();
 scene.add(new THREE.AmbientLight(0xffffff, 0.35));
 
@@ -375,6 +387,7 @@ scene.add(ground);
 const el = {
   viewport: document.querySelector('.viewport'),
   progArtToggle: document.getElementById('progArtToggle'),
+  msaaToggle: document.getElementById('msaaToggle'),
   tpInput: document.getElementById('tpInput'),
   tpGo: document.getElementById('tpGo'),
   tpMsg: document.getElementById('tpMsg'),
@@ -1000,6 +1013,19 @@ if (el.progArtToggle){
 }
 syncTexIndicator();
 
+
+
+function syncMsaaToggle(){
+  if (el.msaaToggle) el.msaaToggle.checked = useMSAA;
+}
+
+if (el.msaaToggle){
+  el.msaaToggle.addEventListener('change', () => {
+    useMSAA = Boolean(el.msaaToggle.checked);
+    rebuildRenderer();
+  });
+}
+syncMsaaToggle();
 
 const texLoader = new THREE.TextureLoader();
 texLoader.setCrossOrigin('anonymous');
