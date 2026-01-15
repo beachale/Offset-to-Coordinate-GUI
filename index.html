@@ -46,13 +46,13 @@
         <div class="row">
           <label class="toggle"><input id="useFeetY" type="checkbox" checked /> Feet Y (Minecraft XYZ)</label>
           <label class="toggle"><input id="centerTpXZ" type="checkbox" /> Center X/Z integers (.5)</label>
-          <!-- Workspace size is still used internally, but the inputs are hidden to reduce UI clutter. -->
+          <!-- Resolution is still used internally, but the inputs are hidden to reduce UI clutter. -->
           <input id="viewW" type="hidden" value="960" />
           <input id="viewH" type="hidden" value="540" />
           <label>Render W <input id="renderW" type="number" step="1" value="960" /></label>
           <label>Render H <input id="renderH" type="number" step="1" value="540" /></label>
-          <button id="applyViewSize" type="button">Apply workspace</button>
-          <button id="sizeToOverlay" type="button" title="Set workspace size to the loaded overlay image">Size = overlay</button>
+          <button id="applyViewSize" type="button">Apply resolution</button>
+          <button id="sizeToOverlay" type="button" title="Set resolution to the loaded overlay image">Size = overlay</button>
           <label class="file">
             Overlay image (any size)
             <input id="overlayFile" type="file" accept="image/png,image/jpeg" />
@@ -76,7 +76,7 @@
         <summary>Texture Align</summary>
         <div class="row">
           <div class="kbdhelp">
-            <div><b>Left click</b>: select grass</div>
+            <div><b>Left click</b>: select offset</div>
             <div><b>Right click</b>: enter placement mode</div>
             <div><b>Right click again</b>: confirm placement</div>
             <div><b>WASD / arrow keys</b>: move the selected offset X/Z (snaps to valid steps)</div>
@@ -107,11 +107,11 @@
           <label>Y <input id="selBlockY" type="number" step="1" value="0" /></label>
           <label>Z <input id="selBlockZ" type="number" step="1" value="0" /></label>
           <button id="applySelBlock" type="button">Set selected block</button>
-          <span class="hint">Moves the currently selected grass to a new block (keeps its offsets).</span>
+          <span class="hint">Moves the currently selected texture to a new block (keeps its offsets).</span>
         </div>
 
         <div class="row">
-          <label>Grass list</label>
+          <label>Offset list</label>
           <select id="grassList" size="8" class="list"></select>
         </div>
 
@@ -129,7 +129,7 @@
 123 64 -20  7 7 7
 124 64 -20  3 7 12"></textarea>
         <div class="row">
-          <button id="loadGrassData">Load grass data</button>
+          <button id="loadGrassData">Load offset data</button>
         </div>
 
         <textarea id="exportBox" spellcheck="false" placeholder="Export will appear here…"></textarea>
@@ -186,8 +186,8 @@
           <label class="toggle msaa" title="Multisample anti-aliasing"><input id="msaaToggle" type="checkbox" checked /> MSAA</label>
         </div>
       <canvas id="view" width="960" height="540"></canvas>
-      <div class="foliage-picker" title="Choose which foliage type you are placing">
-        <label>Foliage
+      <div class="foliage-picker" title="Choose which texture type you are placing">
+        <label>Textures
           <select id="foliageSelect"></select>
         </label>
         <div id="bambooUvControls" class="variant-controls hidden" title="Bamboo UV shift (matches in-game random bamboo texture offsets)">

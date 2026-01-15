@@ -1217,6 +1217,13 @@ async function refreshAllFoliageTextures(){
 // Values are Promises that resolve to a parsed model object (or null on failure).
 const modelJsonCache = new Map();
 
+//
+// Local override: ground mangrove propagule model (for visuals only).
+// Source: https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-1/assets/minecraft/models/block/mangrove_propagule.json
+//
+const LOCAL_MANGROVE_PROPAGULE_GROUND_MODEL = {"ambientocclusion":false,"textures":{"particle":"block/mangrove_propagule","sapling":"block/mangrove_propagule"},"elements":[{"name":"leaves","from":[4.5,9,8],"to":[11.5,15,8],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"north":{"uv":[4,1,11,7],"texture":"#sapling"},"south":{"uv":[4,1,11,7],"texture":"#sapling"}}},{"name":"leaves","from":[8,9,4.5],"to":[8,15,11.5],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"east":{"uv":[4,1,11,7],"texture":"#sapling"},"west":{"uv":[4,1,11,7],"texture":"#sapling"}}},{"name":"hypocotyl","from":[8,0,7],"to":[8,9,9],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"east":{"uv":[7,7,9,16],"texture":"#sapling"},"west":{"uv":[7,7,9,16],"texture":"#sapling"}}},{"name":"hypocotyl","from":[7,0,8],"to":[9,9,8],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"north":{"uv":[7,7,9,16],"texture":"#sapling"},"south":{"uv":[7,7,9,16],"texture":"#sapling"}}}]};
+modelJsonCache.set('mangrove_propagule', Promise.resolve(LOCAL_MANGROVE_PROPAGULE_GROUND_MODEL));
+
 async function getBlockTexture(texName){
   const key = String(texName || '').trim();
   if (!key) return PLACEHOLDER_TEX;
@@ -1379,7 +1386,7 @@ const FOLIAGE = {
     {
       label: 'misc',
       items: [
-        { id: 'CUBE', label: 'cube', offsetType: 'XZ', model: 'single' },
+        { id: 'CUBE', label: 'cube (for visuals only)', offsetType: 'XZ', model: 'single' },
         { id: 'HANGING_ROOTS', label: 'hanging roots', offsetType: 'XZ', model: 'single' },
         { id: 'MANGROVE_PROPAGULE', label: 'mangrove propagule', offsetType: 'XZ', model: 'single' },
         { id: 'BAMBOO_SAPLING', label: 'bamboo sapling', offsetType: 'XZ', model: 'single' },
@@ -2180,6 +2187,11 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
     // Carry selection tint metadata so special-case selection logic can work.
     m.userData.__mcTexName = texName;
 
+    // Vanilla biome-tints grass_block_top; mirror the short-grass fixed tint.
+    if (texName === 'grass_block_top' && m.color) {
+      m.color.setHex(GRAYSCALE_FOLIAGE_OVERLAY_HEX);
+    }
+
     const idx = materials.length;
     materials.push(m);
     texToMatIndex.set(texName, idx);
@@ -2804,14 +2816,40 @@ function setSelected(id){
     // - Sunflower top uses the sunflower_top block model with multiple textures.
     // - Pointed dripstone stacks have one material per segment (base/middle/frustum/tip).
     // For these, just tint the existing materials to indicate selection.
-    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE' || g.kind === 'CUBE') {
+    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE') {
       const tintHex = isSel ? 0xdb8484 : 0xdddddd;
       g.mesh.traverse(obj => {
-        if (obj.isMesh && obj.material && obj.material.color) {
-          obj.material.color.setHex(tintHex);
-          // Keep selection readable through other transparent foliage.
-          obj.material.depthTest = true;
-          obj.material.depthWrite = true;
+        if (!obj.isMesh) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (m && m.color) {
+            m.color.setHex(tintHex);
+            // Keep selection readable through other transparent foliage.
+            m.depthTest = true;
+            m.depthWrite = true;
+          }
+        }
+      });
+      continue;
+    }
+
+    // Cube is a reference block; keep grass_block_top tinted like short grass when not selected.
+    if (g.kind === 'CUBE') {
+      const selHex = 0xdb8484;
+      const baseHex = 0xdddddd;
+      g.mesh.traverse(obj => {
+        if (!obj.isMesh) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (!m || !m.color) continue;
+          if (isSel) {
+            m.color.setHex(selHex);
+          } else {
+            const texName = m.userData?.__mcTexName;
+            m.color.setHex(texName === 'grass_block_top' ? GRAYSCALE_FOLIAGE_OVERLAY_HEX : baseHex);
+          }
+          m.depthTest = true;
+          m.depthWrite = true;
         }
       });
       continue;
@@ -2892,7 +2930,9 @@ function setSelected(id){
 function refreshGrassList(){
   const prev = selectedId;
   el.grassList.innerHTML = '';
-  const ordered = [...grasses.values()].sort((a,b)=>a.id-b.id);
+  const ordered = [...grasses.values()]
+    .filter(g => g && g.kind !== 'CUBE')
+    .sort((a,b)=>a.id-b.id);
   for (const g of ordered) {
     const opt = document.createElement('option');
     opt.value = String(g.id);
