@@ -122,7 +122,7 @@
         </div>
 
         <div class="row" style="margin-top:10px;">
-          <label for="grassDataIn">Grass data input (strict)</label>
+          <label for="grassDataIn">Offset data input (strict)</label>
           <span class="hint">Paste lines in format: <code>blockX blockY blockZ  offX offY offZ KIND</code> (KIND optional; offsets 0–15)</span>
         </div>
         <textarea id="grassDataIn" spellcheck="false" placeholder="e.g.
@@ -162,7 +162,7 @@
           </label>
 
           <p id="warn" class="warning hidden">
-            Scored mode allows small mistakes. Use more grass samples for accuracy.
+            Scored mode allows small mistakes. Use more offset samples for accuracy
           </p>
 
           <div class="row">
@@ -246,7 +246,7 @@
       <div class="badge">
         <div><span class="swatch grid"></span> Grid (light gray)</div>
         <div><span class="swatch chunk"></span> Chunk borders (yellow)</div>
-        <div><span class="swatch sel"></span> Selected grass</div>
+        <div><span class="swatch sel"></span> Selected texture</div>
       </div>
       </div>
       <div class="workspace__hint">Scroll = zoom • Hold left click + drag = pan • Right click = place mode • WASD/Arrows = move offset • DEL = delete selected</div>
@@ -266,7 +266,7 @@
   </footer>
 
   <a class="gpt-credit" href="https://github.com/beachale/Offset-to-Coordinate-GUI" target="_blank" rel="noreferrer" aria-label="Grassfinder GitHub">
-    Grassfinder code optimized by GPT
+    Offsetfinder code optimized by GPT
   </a>
 
   <script type="module" src="./main.js"></script>

@@ -2866,7 +2866,7 @@ function setSelected(id){
 		}
 	}
 
-  // Selected grass block position (separate from "active block")
+  // Selected texture block position (separate from "active block")
   el.selBlockX.value = String(g.block.x);
   el.selBlockY.value = String(g.block.y);
   el.selBlockZ.value = String(g.block.z);
@@ -3019,7 +3019,7 @@ function applyOffsetsFromUI({syncUI=true} = {}){
   if (syncUI) setSelected(selectedId);
 }
 
-// --- Selected grass block position UI ---
+// --- Selected texture block position UI ---
 
 function applySelectedBlockFromUI({syncUI=true} = {}){
   if (selectedId == null) return;
@@ -3096,7 +3096,11 @@ el.grassList.addEventListener('change', () => {
 });
 
 el.exportOffsets.addEventListener('click', () => {
-  const ordered = [...grasses.values()].sort((a,b)=>a.id-b.id);
+  // The "cube" entry is a visual reference block (it has no vanilla random render offset).
+  // Do not include it in exported offset datasets.
+  const ordered = [...grasses.values()]
+    .filter(g => String(g?.kind || '') !== 'CUBE')
+    .sort((a,b)=>a.id-b.id);
   const lines = ordered.map(g => {
     const b = g.block;
     const o = g.off;
@@ -3386,7 +3390,10 @@ const GF = (() => {
   }
 
   function rowsFromGrasses(){
-    const ordered = [...grasses.values()].sort((a,b)=>a.id-b.id);
+    // Exclude visual-only reference blocks (like the cube) from cracking datasets.
+    const ordered = [...grasses.values()]
+      .filter(g => String(g?.kind || '') !== 'CUBE')
+      .sort((a,b)=>a.id-b.id);
     return ordered.map(g => ({
       pos: { x: g.block.x|0, y: g.block.y|0, z: g.block.z|0 },
       kind: g.kind,
