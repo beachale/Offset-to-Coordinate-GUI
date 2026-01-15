@@ -1,6 +1,7 @@
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
 const foliageMatCache = new Map();
+const blockCubeMatCache = new Map();
 
 // Float32 helper (matches Java's (float) casts via Math.fround)
 const f = Math.fround;
@@ -126,6 +127,40 @@ function mcForwardFromYawPitch(yawDeg, pitchDeg) {
   return new THREE.Vector3(vx, vy, vz);
 }
 
+// Set Three.js camera quaternion to match Minecraft's render camera rotation.
+// Mirrors net.minecraft.client.Camera.setRotation(yaw, pitch):
+//   rotationYXZ(PI - yaw*RAD_PER_DEG, -pitch*RAD_PER_DEG, 0)
+// Note: Minecraft/JOML computes this using float32 angles and float32 sin/cos, so we
+// fround at the same points.
+function mcSetCameraQuaternion(camera, yawDeg, pitchDeg) {
+  const yawF = f(yawDeg);
+  const pitchF = f(pitchDeg);
+
+  const yawRad = f(yawF * RAD_PER_DEG);
+  const pitchRad = f(pitchF * RAD_PER_DEG);
+
+  // rotationYXZ(y, x, z=0)
+  const yAng = f(PI_F - yawRad);
+  const xAng = f(-pitchRad);
+
+  const half = f(0.5);
+  const hy = f(yAng * half);
+  const hx = f(xAng * half);
+
+  const sy = f(Math.sin(hy));
+  const cy = f(Math.cos(hy));
+  const sx = f(Math.sin(hx));
+  const cx = f(Math.cos(hx));
+
+  // q = qy * qx (z rotation is 0)
+  const qx = f(cy * sx);
+  const qy = f(sy * cx);
+  const qz = f(-sy * sx);
+  const qw = f(cy * cx);
+
+  camera.quaternion.set(qx, qy, qz, qw);
+}
+
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 function wrap(v, a, b){
   const range = (b - a + 1);
@@ -156,6 +191,8 @@ function getMaxHorizontalOffsetForKind(kind){
 // Convert the 0..15 per-axis offset integers into Minecraft's baked-model translation.
 // Most foliage uses +/-0.25 horizontal, but pointed dripstone uses +/-0.125.
 function offsetToVec3ForKind(kind, offX, offY, offZ) {
+  // Blocks like the reference grass block cube have no random render offset in vanilla.
+  if (String(kind || '') === 'CUBE') return new THREE.Vector3(0, 0, 0);
   const maxH = getMaxHorizontalOffsetForKind(kind);
 
   // 1. Force the input to be an integer nibble (0..15)
@@ -444,6 +481,8 @@ const el = {
   variantDir: document.getElementById('variantDir'),
   propaguleControls: document.getElementById('propaguleControls'),
   propaguleModel: document.getElementById('propaguleModel'),
+  cubeControls: document.getElementById('cubeControls'),
+  cubeBlockType: document.getElementById('cubeBlockType'),
   exportOffsets: document.getElementById('exportOffsets'),
   exportBox: document.getElementById('exportBox'),
   grassDataIn: document.getElementById('grassDataIn'),
@@ -642,7 +681,8 @@ function syncOverlayUI(){
 
 function syncGrassOpacityUI(){
   grassOpacity = clamp(num(el.grassOpacity?.value, 1.0), 0, 1);
-  // Apply to all cached materials.
+
+  // Apply to all cached foliage materials.
   for (const mats of foliageMatCache?.values?.() ?? []) {
     if (mats.model === 'double') {
       for (const m of [mats.baseBottom, mats.baseTop, mats.selectedBottom, mats.selectedTop]) {
@@ -661,7 +701,15 @@ function syncGrassOpacityUI(){
       }
     }
   }
+
+  // Apply to any block-cube template materials (e.g., grass block cube).
+  for (const mats of blockCubeMatCache?.values?.() ?? []) {
+    if (!mats) continue;
+    if (mats.base) { mats.base.opacity = grassOpacity; mats.base.transparent = (grassOpacity < 1); }
+    if (mats.placement) { mats.placement.opacity = clamp(grassOpacity * 0.65, 0, 1); mats.placement.transparent = true; }
+  }
 }
+
 
 function syncGridRadiusUI(){
   if (!el.gridRadiusLabel || !el.gridRadius) return;
@@ -696,7 +744,10 @@ function syncVisibilityUI(){
 }
 
 el.overlayOpacity.addEventListener('input', syncOverlayUI);
-el.grassOpacity?.addEventListener('input', syncGrassOpacityUI);
+el.grassOpacity?.addEventListener('input', () => {
+  syncGrassOpacityUI();
+  try { syncSpecialModelOpacity(); } catch (_) { /* placement mode not initialized yet */ }
+});
 el.showOverlay.addEventListener('change', syncOverlayUI);
 el.gridRadius?.addEventListener('input', () => {
   syncGridRadiusUI();
@@ -886,12 +937,9 @@ function updateCameraFromUI(){
 
   camera.position.copy(camPos);
 
-  // Apply lookAt using float-rounded addition (matches MC's float math order).
-  camera.lookAt(
-    f(camPos.x + forward.x),
-    f(camPos.y + forward.y),
-    f(camPos.z + forward.z)
-  );
+  // Match Minecraft's render-camera rotation pipeline (no lookAt).
+  // This prevents tiny basis differences that can manifest as distance-amplified drift.
+  mcSetCameraQuaternion(camera, yaw, pitch);
 
   if (feetMode) {
     const yFeet = yInput;
@@ -1212,6 +1260,63 @@ function getBlockModelJSON(modelName){
   return p;
 }
 
+// --- Synthetic block models: cube with selectable block textures ---
+// We register "cube_<TYPE>" models into the modelJsonCache so the generic model renderer can use them.
+// These use cube.json geometry but inject per-face textures (top/side/bottom) for each block type.
+const CUBE_KIND = 'CUBE';
+
+const CUBE_BLOCK_TYPES = Object.freeze([
+  { token: 'GRASS_BLOCK', label: 'grass block', textures: { up:'block/grass_block_top', side:'block/grass_block_side', down:'block/dirt', particle:'block/dirt' } },
+  { token: 'STONE', label: 'stone block', textures: { all:'block/stone', particle:'block/stone' } },
+  { token: 'PODZOL', label: 'podzol', textures: { up:'block/podzol_top', side:'block/podzol_side', down:'block/dirt', particle:'block/podzol_side' } },
+  { token: 'DIRT_PATH', label: 'dirt path', textures: { up:'block/dirt_path_top', side:'block/dirt_path_side', down:'block/dirt', particle:'block/dirt_path_top' } },
+  { token: 'COARSE_DIRT', label: 'coarse dirt', textures: { all:'block/coarse_dirt', particle:'block/coarse_dirt' } },
+  { token: 'ROOTED_DIRT', label: 'rooted dirt', textures: { all:'block/rooted_dirt', particle:'block/rooted_dirt' } },
+  { token: 'DRIPSTONE_BLOCK', label: 'dripstone block', textures: { all:'block/dripstone_block', particle:'block/dripstone_block' } },
+]);
+
+const CUBE_BLOCK_TYPE_BY_TOKEN = new Map(CUBE_BLOCK_TYPES.map(t => [t.token, t]));
+let activeCubeBlockType = 'GRASS_BLOCK';
+
+function cubeBlockTypeToModelName(token){
+  const t = String(token || '').toUpperCase();
+  return `cube_${t.toLowerCase()}`;
+}
+
+function ensureCubeModelRegistered(token){
+  const t = String(token || '').toUpperCase();
+  const def = CUBE_BLOCK_TYPE_BY_TOKEN.get(t) || CUBE_BLOCK_TYPE_BY_TOKEN.get('GRASS_BLOCK');
+  const modelName = cubeBlockTypeToModelName(def.token);
+  if (modelJsonCache.has(modelName)) return modelName;
+
+  const p = (async () => {
+    const cube = await getBlockModelJSON('cube');
+    if (!cube) return null;
+
+    // Deep clone so we can safely inject textures without mutating the shared cube model.
+    const m = JSON.parse(JSON.stringify(cube));
+    const tex = def.textures || {};
+    const all = tex.all;
+
+    // cube.json expects per-face keys; we map common {up,down,side} forms onto them.
+    m.textures = Object.assign({}, m.textures, {
+      particle: tex.particle || all || tex.side || tex.up || tex.down,
+      down: tex.down || all,
+      up: tex.up || all,
+      north: tex.north || tex.side || all,
+      south: tex.south || tex.side || all,
+      west: tex.west || tex.side || all,
+      east: tex.east || tex.side || all,
+    });
+
+    return m;
+  })();
+
+  modelJsonCache.set(modelName, p);
+  return modelName;
+}
+
+
 // --- Foliage catalog ---
 // Each foliage type has:
 //  - id: stable export/import token
@@ -1274,6 +1379,7 @@ const FOLIAGE = {
     {
       label: 'misc',
       items: [
+        { id: 'CUBE', label: 'cube', offsetType: 'XZ', model: 'single' },
         { id: 'HANGING_ROOTS', label: 'hanging roots', offsetType: 'XZ', model: 'single' },
         { id: 'MANGROVE_PROPAGULE', label: 'mangrove propagule', offsetType: 'XZ', model: 'single' },
         { id: 'BAMBOO_SAPLING', label: 'bamboo sapling', offsetType: 'XZ', model: 'single' },
@@ -1473,6 +1579,20 @@ function syncPropaguleControls(){
   if (el.propaguleModel) el.propaguleModel.value = String(activePropaguleModel || 'ground');
 }
 
+
+function foliageSupportsCubeBlockType(foliageId){
+  return foliageId === 'CUBE';
+}
+
+function syncCubeControls(){
+  const box = el.cubeControls;
+  if (!box) return;
+  const show = foliageSupportsCubeBlockType(activeFoliageId);
+  box.classList.toggle('hidden', !show);
+  if (!show) return;
+  if (el.cubeBlockType) el.cubeBlockType.value = String(activeCubeBlockType || 'GRASS_BLOCK').toUpperCase();
+}
+
 function getActiveVariantFor(foliageId){
   if (!foliageSupportsHeight(foliageId)) return null;
   const v = { height: activeVariantHeight|0 };
@@ -1512,6 +1632,7 @@ function setPlacementFoliage(id){
 
   showHideBambooUvControls();
   syncPropaguleControls();
+  syncCubeControls();
 // If we are in placement mode, rebuild preview immediately.
   if (typeof placementMode !== 'undefined' && placementMode) {
     ensurePlacementOffsetRules();
@@ -1527,6 +1648,7 @@ populateFoliageSelect();
 
 showHideBambooUvControls();
 syncBambooUvUI();
+syncCubeControls();
 
 updateOffsetUiMode();
 
@@ -1609,6 +1731,50 @@ el.propaguleModel?.addEventListener('change', () => {
     // no-op (defensive: selection state not ready yet)
   }
 });
+
+
+syncCubeControls();
+
+el.cubeBlockType?.addEventListener('change', () => {
+  const ct = String(el.cubeBlockType.value || 'GRASS_BLOCK').toUpperCase();
+  activeCubeBlockType = CUBE_BLOCK_TYPE_BY_TOKEN.has(ct) ? ct : 'GRASS_BLOCK';
+
+  // If we're placing, rebuild the preview so the textures update immediately.
+  if (typeof placementMode !== 'undefined' && placementMode) {
+    ensurePlacementPreview();
+  }
+
+  // If a cube is currently selected, apply the texture change to it as well.
+  try {
+    if (selectedId != null) {
+      const g = grasses.get(selectedId);
+      if (g && g.kind === 'CUBE') {
+        g.cubeType = activeCubeBlockType;
+
+        const old = g.mesh;
+        const cmats = ensureCubeMats();
+        const modelName = ensureCubeModelRegistered(activeCubeBlockType);
+        const newMesh = makeAsyncMinecraftModelMesh(modelName, cmats.base, { perFaceMaterials: true });
+        newMesh.userData.__grassId = g.id;
+
+        grassGroup.remove(old);
+        grassGroup.add(newMesh);
+        g.mesh = newMesh;
+
+        // Best-effort dispose old geometry.
+        old?.traverse?.(obj => { if (obj.isMesh && obj.geometry) obj.geometry.dispose?.(); });
+
+        updateGrassMeshTransform(g);
+        refreshGrassList();
+        setSelected(selectedId);
+      }
+    }
+  } catch (_) {
+    // ignore (defensive: selection state not ready yet)
+  }
+});
+
+
 
 
 el.variantHeight?.addEventListener('input', () => {
@@ -1711,6 +1877,31 @@ function texNamesForFoliage(id){
     depthWrite: true,
   });
   return m;
+}
+
+// Materials for the reference grass block cube (6 faces, 3 textures).
+// NOTE: The actual per-face textured materials are created inside buildMinecraftModelGroup()
+// when perFaceMaterials=true. These base/placement materials act as templates (tint/opacity/etc.).
+function ensureCubeMats(){
+  const key = 'CUBE';
+  if (blockCubeMatCache.has(key)) return blockCubeMatCache.get(key);
+
+  const base = new THREE.MeshBasicMaterial({
+    map: PLACEHOLDER_TEX,
+    color: 0xdddddd,
+    opacity: grassOpacity,
+    transparent: (grassOpacity < 1),
+    side: THREE.FrontSide,
+    depthWrite: true,
+  });
+
+  const placement = base.clone();
+  placement.opacity = clamp(grassOpacity * 0.65, 0, 1);
+  placement.transparent = true;
+
+  const mats = { base, placement };
+  blockCubeMatCache.set(key, mats);
+  return mats;
 }
 
 /**
@@ -1913,20 +2104,26 @@ function rotateUvQuad(quad, rotDeg){
   return quad;
 }
 
-function applyFaceUvToPlaneGeometry(geo, uvPix, rotDeg){
-  if (!geo || !geo.attributes?.uv || !Array.isArray(uvPix) || uvPix.length < 4) return;
-  const u1 = uvPix[0] / 16;
-  const v1t = 1 - (uvPix[1] / 16); // top
-  const u2 = uvPix[2] / 16;
-  const v2b = 1 - (uvPix[3] / 16); // bottom
-
+function uvQuadFromPix(uvPix, rotDeg){
+  // Returns [[u,v] TL, TR, BL, BR] normalized 0..1.
+  const uv = (Array.isArray(uvPix) && uvPix.length >= 4) ? uvPix : [0,0,16,16];
+  const u1 = uv[0] / 16;
+  const v1t = 1 - (uv[1] / 16); // top
+  const u2 = uv[2] / 16;
+  const v2b = 1 - (uv[3] / 16); // bottom
   let quad = [
     [u1, v1t], // TL
     [u2, v1t], // TR
     [u1, v2b], // BL
     [u2, v2b], // BR
   ];
-  quad = rotateUvQuad(quad, rotDeg);
+  return rotateUvQuad(quad, rotDeg);
+}
+
+
+function applyFaceUvToPlaneGeometry(geo, uvPix, rotDeg){
+  if (!geo || !geo.attributes?.uv) return;
+  const quad = uvQuadFromPix(uvPix, rotDeg);
   const arr = geo.attributes.uv.array;
   // PlaneGeometry uses 4 vertices with uv order TL, TR, BL, BR
   arr[0] = quad[0][0]; arr[1] = quad[0][1];
@@ -1963,15 +2160,18 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
   const root = new THREE.Group();
   if (!model || !Array.isArray(model.elements)) return root;
 
-  // Optional per-face material support (needed for sunflower_top which uses multiple textures).
-  // Keyed by texture name so we reuse material instances within the same build.
+  // Optional per-face material support (needed for blocks like sunflower_top which use multiple textures).
+  // We build a multi-material array + geometry groups so the entire element shares one object transform,
+  // eliminating 1px cracks that can happen when each face is a separate Mesh with its own matrix.
+  const texToMatIndex = new Map();
+  const materials = perFaceMaterials ? [material] : null; // index 0 = fallback base
   const perFaceMatCache = new Map();
 
-  function getMatForFace(face){
-    if (!perFaceMaterials) return material;
+  function matIndexForFace(face){
+    if (!perFaceMaterials) return 0;
     const texName = resolveMcModelTextureName(model, face?.texture);
-    if (!texName) return material;
-    if (perFaceMatCache.has(texName)) return perFaceMatCache.get(texName);
+    if (!texName) return 0;
+    if (texToMatIndex.has(texName)) return texToMatIndex.get(texName);
 
     const m = material.clone();
     m.map = PLACEHOLDER_TEX;
@@ -1979,6 +2179,10 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
     hideMaterialForLoad(m);
     // Carry selection tint metadata so special-case selection logic can work.
     m.userData.__mcTexName = texName;
+
+    const idx = materials.length;
+    materials.push(m);
+    texToMatIndex.set(texName, idx);
     perFaceMatCache.set(texName, m);
 
     (async () => {
@@ -1988,78 +2192,93 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
       revealMaterialAfterLoad(m);
     })();
 
-    return m;
+    return idx;
+  }
+
+  function pushTri(posArr, uvArr, a, b, c, uva, uvb, uvc){
+    posArr.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+    uvArr.push(uva[0],uva[1], uvb[0],uvb[1], uvc[0],uvc[1]);
   }
 
   for (const elmt of model.elements) {
-    const from = (elmt.from ?? [0,0,0]).map(v => v / 16);
-    const to   = (elmt.to   ?? [16,16,16]).map(v => v / 16);
+    const from = (elmt.from ?? [0,0,0]).map(v => f(v / 16));
+    const to   = (elmt.to   ?? [16,16,16]).map(v => f(v / 16));
 
-    const sx = Math.abs(to[0] - from[0]);
-    const sy = Math.abs(to[1] - from[1]);
-    const sz = Math.abs(to[2] - from[2]);
-    const cx = (from[0] + to[0]) / 2;
-    const cy = (from[1] + to[1]) / 2;
-    const cz = (from[2] + to[2]) / 2;
+    const x0 = from[0], y0 = from[1], z0 = from[2];
+    const x1 = to[0],   y1 = to[1],   z1 = to[2];
 
     const faces = elmt.faces ?? {};
     const elementGroup = new THREE.Group();
 
-    function addFacePlane(which){
-      const f = faces[which];
-      if (!f) return;
-      const uv = f.uv;
-      const rot = f.rotation ?? 0;
+    const pos = [];
+    const uvs = [];
+    const groups = []; // {start,count,matIndex}
 
-      const faceMat = getMatForFace(f);
+    function addFace(which){
+      const face = faces[which];
+      if (!face) return;
 
-      let w=0, h=0;
-      let mesh=null;
+      const uvPix = face.uv ?? [0,0,16,16];
+      const rot = face.rotation ?? 0;
+      const quadUV = uvQuadFromPix(uvPix, rot); // TL, TR, BL, BR
 
-      if (which === 'north' || which === 'south') {
-        w = sx; h = sy;
-        const geo = new THREE.PlaneGeometry(w, h);
-        applyFaceUvToPlaneGeometry(geo, uv, rot);
-        mesh = new THREE.Mesh(geo, faceMat);
-        mesh.position.set(cx, cy, (which === 'north') ? from[2] : to[2]);
-        if (which === 'north') mesh.rotation.y = Math.PI;
-      } else if (which === 'east' || which === 'west') {
-        w = sz; h = sy;
-        const geo = new THREE.PlaneGeometry(w, h);
-        applyFaceUvToPlaneGeometry(geo, uv, rot);
-        mesh = new THREE.Mesh(geo, faceMat);
-        mesh.position.set((which === 'west') ? from[0] : to[0], cy, cz);
-        // PlaneGeometry faces +Z by default; rotate so the face normal matches Minecraft.
-        mesh.rotation.y = (which === 'west') ? -Math.PI/2 : Math.PI/2;
-      } else if (which === 'up' || which === 'down') {
-        w = sx; h = sz;
-        const geo = new THREE.PlaneGeometry(w, h);
-        applyFaceUvToPlaneGeometry(geo, uv, rot);
-        mesh = new THREE.Mesh(geo, faceMat);
-        mesh.position.set(cx, (which === 'down') ? from[1] : to[1], cz);
-        mesh.rotation.x = (which === 'down') ? Math.PI/2 : -Math.PI/2;
+      // Match the previous PlaneGeometry+rotation pipeline exactly (but without per-face Mesh transforms).
+      let TL, TR, BL, BR;
+
+      if (which === 'south') {
+        TL = [x0, y1, z1]; TR = [x1, y1, z1]; BL = [x0, y0, z1]; BR = [x1, y0, z1];
+      } else if (which === 'north') {
+        TL = [x1, y1, z0]; TR = [x0, y1, z0]; BL = [x1, y0, z0]; BR = [x0, y0, z0];
+      } else if (which === 'west') {
+        TL = [x0, y1, z0]; TR = [x0, y1, z1]; BL = [x0, y0, z0]; BR = [x0, y0, z1];
+      } else if (which === 'east') {
+        TL = [x1, y1, z1]; TR = [x1, y1, z0]; BL = [x1, y0, z1]; BR = [x1, y0, z0];
+      } else if (which === 'up') {
+        TL = [x0, y1, z0]; TR = [x1, y1, z0]; BL = [x0, y1, z1]; BR = [x1, y1, z1];
+      } else if (which === 'down') {
+        TL = [x0, y0, z1]; TR = [x1, y0, z1]; BL = [x0, y0, z0]; BR = [x1, y0, z0];
+      } else {
+        return;
       }
 
-      if (mesh) {
-        // Mark for raycasting like other foliage.
-        mesh.userData.__isGrassPart = true;
-        elementGroup.add(mesh);
+      const start = (pos.length / 3);
+      // Two triangles: TL, BL, TR and BL, BR, TR (same as PlaneGeometry)
+      pushTri(pos, uvs, TL, BL, TR, quadUV[0], quadUV[2], quadUV[1]);
+      pushTri(pos, uvs, BL, BR, TR, quadUV[2], quadUV[3], quadUV[1]);
+
+      if (perFaceMaterials) {
+        const mi = matIndexForFace(face);
+        groups.push({ start, count: 6, materialIndex: mi });
       }
     }
 
-    // Add all supported faces present in the json.
-    addFacePlane('north');
-    addFacePlane('south');
-    addFacePlane('east');
-    addFacePlane('west');
-    addFacePlane('up');
-    addFacePlane('down');
+    addFace('north');
+    addFace('south');
+    addFace('east');
+    addFace('west');
+    addFace('up');
+    addFace('down');
+
+    if (pos.length > 0) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+
+      if (perFaceMaterials) {
+        // Ensure we have at least one group; if a face had no texture, it will use material index 0.
+        for (const g of groups) geo.addGroup(g.start, g.count, g.materialIndex);
+      }
+
+      const mesh = new THREE.Mesh(geo, perFaceMaterials ? materials : material);
+      mesh.userData.__isGrassPart = true;
+      elementGroup.add(mesh);
+    }
 
     // Apply element rotation (with rescale) exactly like Minecraft (same approach as makeGrassMesh).
     if (elmt.rotation) {
       const axis = String(elmt.rotation.axis).toLowerCase();
       const angleDeg = Number(elmt.rotation.angle ?? 0);
-      const origin = (elmt.rotation.origin ?? [8, 8, 8]).map(v => v / 16);
+      const origin = (elmt.rotation.origin ?? [8, 8, 8]).map(v => f(v / 16));
       const rescale = Boolean(elmt.rotation.rescale);
       const sVec = mcRescaleVec(axis, angleDeg, rescale);
 
@@ -2212,6 +2431,11 @@ function makeGrassMesh(mat){
 }
 
 function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
+  if (foliageId === 'CUBE') {
+    const cmats = ensureCubeMats();
+    const modelName = ensureCubeModelRegistered(activeCubeBlockType);
+    return makeAsyncMinecraftModelMesh(modelName, cmats.placement, { perFaceMaterials: true });
+  }
   const mats = ensureFoliageMats(foliageId);
   const variant = getActiveVariantFor(foliageId);
 
@@ -2546,6 +2770,11 @@ function grassLabel(g){
     extra += ` ${v.replace('_', ' ')}`;
   }
 
+  if (g.kind === 'CUBE') {
+    const ct = String(g.cubeType || 'GRASS_BLOCK').toLowerCase().replace(/_/g, ' ');
+    extra += ` ${ct}`;
+  }
+
   return `#${g.id}  ${name}${extra}  block(${b.x},${b.y},${b.z})  off(${o.x},${o.y},${o.z})`;
 }
 
@@ -2575,7 +2804,7 @@ function setSelected(id){
     // - Sunflower top uses the sunflower_top block model with multiple textures.
     // - Pointed dripstone stacks have one material per segment (base/middle/frustum/tip).
     // For these, just tint the existing materials to indicate selection.
-    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE') {
+    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE' || g.kind === 'CUBE') {
       const tintHex = isSel ? 0xdb8484 : 0xdddddd;
       g.mesh.traverse(obj => {
         if (obj.isMesh && obj.material && obj.material.color) {
@@ -2623,6 +2852,20 @@ function setSelected(id){
 		}
 	}
 
+
+	// Cube: mirror selected cube's texture into the cube selector.
+	if (g.kind === 'CUBE') {
+		activeCubeBlockType = String(g.cubeType || activeCubeBlockType || 'GRASS_BLOCK').toUpperCase();
+		if (!CUBE_BLOCK_TYPE_BY_TOKEN.has(activeCubeBlockType)) activeCubeBlockType = 'GRASS_BLOCK';
+		if (el.cubeControls) el.cubeControls.classList.remove('hidden');
+		if (el.cubeBlockType) el.cubeBlockType.value = activeCubeBlockType;
+	} else {
+		// Only show the cube selector when placing cubes (unless a cube is currently selected).
+		if (!foliageSupportsCubeBlockType(activeFoliageId) && el.cubeControls) {
+			el.cubeControls.classList.add('hidden');
+		}
+	}
+
   // Selected grass block position (separate from "active block")
   el.selBlockX.value = String(g.block.x);
   el.selBlockY.value = String(g.block.y);
@@ -2666,7 +2909,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   const kind = FOLIAGE.byId.has(foliageId) ? foliageId : 'SHORT_GRASS';
   const def = FOLIAGE.byId.get(kind);
   const model = def?.model ?? 'single';
-  const mats = (kind === 'MANGROVE_PROPAGULE') ? null : ensureFoliageMats(kind);
+  const mats = (kind === 'MANGROVE_PROPAGULE' || kind === 'CUBE') ? null : ensureFoliageMats(kind);
 
   // Enforce vanilla semantics: XZ-only foliage has no Y offset.
   // We store y=15 so offsetToVec3 maps to y=0.
@@ -2679,6 +2922,10 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
     mesh = makeBambooMesh(mats.base, variant?.height ?? 1);
   } else if (kind === 'POINTED_DRIPSTONE') {
     mesh = makeDripstoneStackMesh(mats.base, variant?.height ?? 1, variant?.dir ?? 'up');
+  } else if (kind === 'CUBE') {
+    const cmats = ensureCubeMats();
+    const modelName = ensureCubeModelRegistered(activeCubeBlockType);
+    mesh = makeAsyncMinecraftModelMesh(modelName, cmats.base, { perFaceMaterials: true });
   } else if (kind === 'MANGROVE_PROPAGULE') {
     const pmats = ensurePropaguleMats(activePropaguleModel);
     const modelName = propaguleModelToBlockModelName(activePropaguleModel);
@@ -2697,6 +2944,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
 
   const g = { id, kind, block: block.clone(), off: { ...fixedOff }, mesh, variant: getActiveVariantFor(kind) };
   if (kind === 'MANGROVE_PROPAGULE') g.propaguleModel = String(activePropaguleModel || 'ground');
+  if (kind === 'CUBE') g.cubeType = String(activeCubeBlockType || 'GRASS_BLOCK');
   grasses.set(id, g);
   occupiedByBlock.set(bKey, id);
 
@@ -2854,7 +3102,9 @@ el.exportOffsets.addEventListener('click', () => {
     const o = g.off;
     const oy = isYOffsetLocked(g.kind) ? 15 : o.y;
     // Always include foliage id so the cracker can apply the correct axis mask.
-    const extra = (g.kind === 'MANGROVE_PROPAGULE' && g.propaguleModel) ? ` ${g.propaguleModel}` : '';
+    let extra = '';
+    if (g.kind === 'MANGROVE_PROPAGULE' && g.propaguleModel) extra = ` ${g.propaguleModel}`;
+    if (g.kind === 'CUBE') extra = ` ${String(g.cubeType || 'GRASS_BLOCK').toUpperCase()}`;
     return `${b.x} ${b.y} ${b.z}  ${o.x} ${oy} ${o.z} ${g.kind}${extra}`;
   });
   el.exportBox.value = lines.join('\n');
@@ -2888,6 +3138,9 @@ function parseGrassDataStrict(text){
     if (/^tall$/i.test(kind)) kind = 'TALL_GRASS';
     kind = kind.toUpperCase();
 
+    // Legacy alias for earlier builds
+    if (kind === 'GRASS_BLOCK_CUBE') kind = 'CUBE';
+
     // Normalize unknown foliage ids to SHORT_GRASS so the UI stays usable.
     if (!FOLIAGE.byId.has(kind)) kind = 'SHORT_GRASS';
 
@@ -2897,6 +3150,11 @@ function parseGrassDataStrict(text){
 
     const row = {bx,by,bz,ox,oy,oz,kind};
     if (kind === 'MANGROVE_PROPAGULE' && variantToken) row.propaguleModel = variantToken;
+    if (kind === 'CUBE') {
+      let ct = variantToken ? String(variantToken).toUpperCase() : 'GRASS_BLOCK';
+      if (!CUBE_BLOCK_TYPE_BY_TOKEN.has(ct)) ct = 'GRASS_BLOCK';
+      row.cubeType = ct;
+    }
     rows.push(row);
   }
   if (!rows.length) throw new Error('No grass data found.');
@@ -2910,12 +3168,18 @@ el.loadGrassData.addEventListener('click', () => {
     let skipped = 0;
     for (const r of rows){
       const prevProp = activePropaguleModel;
+      const prevCube = activeCubeBlockType;
       if (r.kind === 'MANGROVE_PROPAGULE') {
         activePropaguleModel = String(r.propaguleModel || 'ground');
+      }
+      if (r.kind === 'CUBE') {
+        const ct = String(r.cubeType || 'GRASS_BLOCK').toUpperCase();
+        activeCubeBlockType = CUBE_BLOCK_TYPE_BY_TOKEN.has(ct) ? ct : 'GRASS_BLOCK';
       }
             const placed = addGrass(new THREE.Vector3(r.bx, r.by, r.bz), {x:r.ox, y:r.oy, z:r.oz}, r.kind);
       if (placed == null) skipped++;
       activePropaguleModel = prevProp;
+      activeCubeBlockType = prevCube;
     }
     // select first grass and set active block
     const first = [...grasses.values()].sort((a,b)=>a.id-b.id)[0];
@@ -3536,9 +3800,11 @@ function ensurePlacementPreview(){
     ? (activeFoliageId === 'BAMBOO'
         ? `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}|${bambooModelSize}`
         : `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}`)
-    : (activeFoliageId === 'MANGROVE_PROPAGULE'
-        ? `${activeFoliageId}|${activePropaguleModel}`
-        : activeFoliageId);
+    : (activeFoliageId === 'CUBE'
+        ? `${activeFoliageId}|${String(activeCubeBlockType || 'GRASS_BLOCK').toUpperCase()}`
+        : (activeFoliageId === 'MANGROVE_PROPAGULE'
+            ? `${activeFoliageId}|${activePropaguleModel}`
+            : activeFoliageId));
   if (placementPreview && placementPreview.userData.__previewKey === previewKey) return;
 
   if (placementPreview) {
@@ -3825,6 +4091,47 @@ window.addEventListener('keydown', (e) => {
 
 // (No default grass on load; list starts empty.)
 
+
+// Some models use per-face materials created on the fly (e.g., block models).
+// Those materials are not part of foliageMatCache, so we update their opacity here.
+function syncSpecialModelOpacity(){
+  try {
+    const baseOp = grassOpacity;
+    const placeOp = clamp(grassOpacity * 0.65, 0, 1);
+
+    // Update placed grass-block-cube meshes (and other per-face block models)
+    for (const g of grasses.values()) {
+      if (!g || !g.mesh) continue;
+      if (g.kind !== 'CUBE' && g.kind !== 'SUNFLOWER') continue;
+      g.mesh.traverse(obj => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (!m) continue;
+          m.opacity = baseOp;
+          m.transparent = (baseOp < 1);
+          m.depthWrite = true;
+        }
+      });
+    }
+
+    // Update placement preview (if active)
+    if (placementPreview) {
+      placementPreview.traverse(obj => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (!m) continue;
+          m.opacity = placeOp;
+          m.transparent = true;
+          m.depthWrite = true;
+        }
+      });
+    }
+  } catch (_) {
+    // ignore (defensive: placement mode not initialized yet)
+  }
+}
 // --- Render loop ---
 function animate(){
   updateCameraFromUI();
