@@ -55,7 +55,7 @@
           <button id="sizeToOverlay" type="button" title="Set resolution to the loaded overlay image">Size = overlay</button>
           <label class="file">
             Overlay image (any size)
-            <input id="overlayFile" type="file" accept="image/png,image/jpeg" />
+            <input id="overlayFile" type="file" accept="image/png,image/jpeg,image/bmp,.bmp" />
           </label>
           <label>Overlay opacity <input id="overlayOpacity" type="range" min="0" max="1" step="0.01" value="0.65" /></label>
           <label>Texture opacity <input id="grassOpacity" type="range" min="0" max="1" step="0.01" value="1" /></label>
@@ -232,6 +232,7 @@
           <label>Block type
             <select id="cubeBlockType">
               <option value="GRASS_BLOCK" selected>grass block</option>
+              <option value="DIRT">dirt</option>
               <option value="STONE">stone block</option>
               <option value="PODZOL">podzol</option>
               <option value="DIRT_PATH">dirt path</option>

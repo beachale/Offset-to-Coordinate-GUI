@@ -662,9 +662,100 @@ function teleportFromTpInput() {
 }
 
 // Overlay image state (drawn into the compositor canvas, never scaled)
-let overlayImage = null; // HTMLImageElement
+// NOTE: We allow several CanvasImageSource types here (HTMLImageElement / HTMLCanvasElement / ImageBitmap).
+let overlayImage = null; // CanvasImageSource
+let overlayImageW = 0;
+let overlayImageH = 0;
 let overlayOpacity = 0.65;
 let overlayVisible = true;
+
+function overlayHasImage(){ return !!overlayImage && overlayImageW > 0 && overlayImageH > 0; }
+
+function setOverlayImage(src, w, h){
+  overlayImage = src;
+  overlayImageW = Math.max(0, Math.trunc(Number(w) || 0));
+  overlayImageH = Math.max(0, Math.trunc(Number(h) || 0));
+}
+
+// Minimal BMP decoder (uncompressed 24/32-bit). Used as a fallback when the browser can't decode BMP.
+function decodeBmpToCanvas(buf){
+  const dv = new DataView(buf);
+  if (dv.byteLength < 54) throw new Error('BMP file is too small.');
+  const sig = String.fromCharCode(dv.getUint8(0), dv.getUint8(1));
+  if (sig !== 'BM') throw new Error('Not a BMP file.');
+
+  const pixelOffset = dv.getUint32(10, true);
+  const dibSize = dv.getUint32(14, true);
+  if (dibSize < 40) throw new Error('Unsupported BMP header.');
+
+  const width = dv.getInt32(18, true);
+  const heightSigned = dv.getInt32(22, true);
+  const planes = dv.getUint16(26, true);
+  const bpp = dv.getUint16(28, true);
+  const compression = dv.getUint32(30, true);
+
+  if (planes !== 1) throw new Error('Unsupported BMP planes.');
+  if (compression !== 0) throw new Error('Compressed BMP is not supported.');
+  if (!(bpp === 24 || bpp === 32)) throw new Error(`Unsupported BMP bit depth (${bpp}). Use a 24-bit or 32-bit BMP.`);
+  if (!(width > 0)) throw new Error('Invalid BMP width.');
+
+  const height = Math.abs(heightSigned);
+  const topDown = heightSigned < 0;
+  const bytesPerPixel = bpp >> 3;
+  const rowBytes = Math.floor((bpp * width + 31) / 32) * 4; // rows padded to 4 bytes
+  const needed = pixelOffset + rowBytes * height;
+  if (dv.byteLength < needed) throw new Error('Truncated BMP pixel data.');
+
+  const out = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++){
+    const srcY = topDown ? y : (height - 1 - y);
+    const rowStart = pixelOffset + srcY * rowBytes;
+    for (let x = 0; x < width; x++){
+      const src = rowStart + x * bytesPerPixel;
+      const dst = (y * width + x) * 4;
+      const b = dv.getUint8(src);
+      const g = dv.getUint8(src + 1);
+      const r = dv.getUint8(src + 2);
+      const a = (bytesPerPixel === 4) ? dv.getUint8(src + 3) : 255;
+      out[dst] = r;
+      out[dst + 1] = g;
+      out[dst + 2] = b;
+      out[dst + 3] = a;
+    }
+  }
+
+  const c = document.createElement('canvas');
+  c.width = width;
+  c.height = height;
+  const ctx = c.getContext('2d');
+  ctx.putImageData(new ImageData(out, width, height), 0, 0);
+  return c;
+}
+
+async function loadOverlayFromFile(file){
+  const name = String(file?.name || '');
+  const isBmp = /\.bmp$/i.test(name) || String(file?.type || '') === 'image/bmp';
+
+  // 1) Try browser decoding first (works for PNG/JPEG and often BMP too).
+  const img = await new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => { URL.revokeObjectURL(url); resolve(im); };
+    im.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image decode failed.')); };
+    im.src = url;
+  }).catch(async (e) => {
+    // 2) If it's BMP, fall back to a small decoder.
+    if (!isBmp) throw e;
+    const buf = await file.arrayBuffer();
+    const c = decodeBmpToCanvas(buf);
+    return c;
+  });
+
+  // Determine dimensions across source types.
+  const w = (img && 'naturalWidth' in img) ? img.naturalWidth : (img?.width || 0);
+  const h = (img && 'naturalHeight' in img) ? img.naturalHeight : (img?.height || 0);
+  return { src: img, w, h };
+}
 
 // Grass overlay opacity (applies to the in-viewport grass planes)
 let grassOpacity = 1.0;
@@ -761,27 +852,26 @@ el.showGrass.addEventListener('change', syncSceneVisUI);
 el.showGrid?.addEventListener('change', syncVisibilityUI);
 el.showGrass?.addEventListener('change', syncVisibilityUI);
 el.centerTpXZ?.addEventListener('change', updateCameraFromUI);
-el.overlayFile.addEventListener('change', (e) => {
+el.overlayFile.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    overlayImage = img;
+  try {
+    const { src, w, h } = await loadOverlayFromFile(file);
+    setOverlayImage(src, w, h);
+
     // Auto-match workspace + render resolution to the loaded image.
-    const iw = overlayImage?.naturalWidth ?? 0;
-    const ih = overlayImage?.naturalHeight ?? 0;
-    if (iw > 0 && ih > 0) {
-      if (el.viewW) el.viewW.value = String(iw);
-      if (el.viewH) el.viewH.value = String(ih);
-      if (el.renderW) el.renderW.value = String(iw);
-      if (el.renderH) el.renderH.value = String(ih);
-      applyWorkspaceAndRenderSize(iw, ih, iw, ih);
+    if (w > 0 && h > 0) {
+      if (el.viewW) el.viewW.value = String(w);
+      if (el.viewH) el.viewH.value = String(h);
+      if (el.renderW) el.renderW.value = String(w);
+      if (el.renderH) el.renderH.value = String(h);
+      applyWorkspaceAndRenderSize(w, h, w, h);
     }
     syncOverlayUI();
-    URL.revokeObjectURL(url);
-  };
-  img.src = url;
+  } catch (err) {
+    console.error(err);
+    alert(`Failed to load overlay image.\n\n${String(err?.message || err)}`);
+  }
 });
 
 // Workspace + render sizing
@@ -821,8 +911,8 @@ el.applyViewSize?.addEventListener('click', () => {
 
 // Convenience: set workspace and render size to the currently loaded overlay image dimensions.
 el.sizeToOverlay?.addEventListener('click', () => {
-  const iw = overlayImage?.naturalWidth ?? 0;
-  const ih = overlayImage?.naturalHeight ?? 0;
+  const iw = overlayImageW || 0;
+  const ih = overlayImageH || 0;
   if (iw > 0 && ih > 0) {
     if (el.viewW) el.viewW.value = String(iw);
     if (el.viewH) el.viewH.value = String(ih);
@@ -1274,6 +1364,7 @@ const CUBE_KIND = 'CUBE';
 
 const CUBE_BLOCK_TYPES = Object.freeze([
   { token: 'GRASS_BLOCK', label: 'grass block', textures: { up:'block/grass_block_top', side:'block/grass_block_side', down:'block/dirt', particle:'block/dirt' } },
+  { token: 'DIRT', label: 'dirt', textures: { all:'block/dirt', particle:'block/dirt' } },
   { token: 'STONE', label: 'stone block', textures: { all:'block/stone', particle:'block/stone' } },
   { token: 'PODZOL', label: 'podzol', textures: { up:'block/podzol_top', side:'block/podzol_side', down:'block/dirt', particle:'block/podzol_side' } },
   { token: 'DIRT_PATH', label: 'dirt path', textures: { up:'block/dirt_path_top', side:'block/dirt_path_side', down:'block/dirt', particle:'block/dirt_path_top' } },
@@ -3162,21 +3253,35 @@ el.exportOffsets.addEventListener('click', () => {
 function parseGrassDataStrict(text){
   const lines = String(text || '').split(/\r?\n/);
   const rows = [];
-  for (let i=0;i<lines.length;i++){
-    const raw = lines[i].trim();
+
+  for (let i = 0; i < lines.length; i++){
+    // Accept ANY whitespace-separated columns (spaces/tabs), including fixed-width padded columns.
+    // Format:
+    //   blockX blockY blockZ  offX offY offZ  [KIND] [variant]
+    // KIND is optional and defaults to SHORT_GRASS.
+    let raw = String(lines[i] || '').trim();
     if (!raw) continue;
 
-    // Format:
-    //   blockX blockY blockZ  offX offY offZ   [kind]
-    // kind is optional. Supported tokens include the foliage ids (e.g. TALL_GRASS, DANDELION),
-    // plus legacy aliases: short / tall.
-    const m = raw.match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?(?:\s+([A-Za-z0-9_]+))?(?:\s+.*)?$/);
-    if (!m) throw new Error(`Invalid format on line ${i+1}. Expected: blockX blockY blockZ offX offY offZ`);
+    // Allow end-of-line comments (handy for notes while pasting data).
+    raw = raw.replace(/\s*(?:#|\/\/).*$/, '').trim();
+    if (!raw) continue;
 
-    const bx = parseInt(m[1],10), by = parseInt(m[2],10), bz = parseInt(m[3],10);
-    const ox = parseInt(m[4],10), oy = parseInt(m[5],10), oz = parseInt(m[6],10);
-    let kind = (m[7] ? String(m[7]).trim() : 'SHORT_GRASS');
-    const variantToken = m[8] ? String(m[8]).trim() : '';
+    // Tokenize by whitespace (handles "lots of spaces" and tabs).
+    const parts = raw.split(/\s+/);
+    if (parts.length < 6){
+      throw new Error(`Invalid format on line ${i+1}. Expected: blockX blockY blockZ offX offY offZ [KIND]`);
+    }
+
+    // Parse the six required integers.
+    const nums = parts.slice(0, 6).map(v => Number(v));
+    if (!nums.every(n => Number.isInteger(n))){
+      throw new Error(`Invalid numbers on line ${i+1}. Expected 6 integers: blockX blockY blockZ offX offY offZ`);
+    }
+    const [bx, by, bz, ox, oy, oz] = nums;
+
+    let kind = (parts[6] ? String(parts[6]).trim() : 'SHORT_GRASS');
+    const variantToken = parts[7] ? String(parts[7]).trim() : '';
+
     // Legacy aliases
     if (/^short$/i.test(kind)) kind = 'SHORT_GRASS';
     if (/^tall$/i.test(kind)) kind = 'TALL_GRASS';
@@ -3188,22 +3293,26 @@ function parseGrassDataStrict(text){
     // Normalize unknown foliage ids to SHORT_GRASS so the UI stays usable.
     if (!FOLIAGE.byId.has(kind)) kind = 'SHORT_GRASS';
 
-    if (![ox,oy,oz].every(v => Number.isInteger(v) && v>=0 && v<=15)){
-      throw new Error(`Offsets must be 0â€“15 on line ${i+1}. Got: ${ox} ${oy} ${oz}`);
+    if (![ox, oy, oz].every(v => Number.isInteger(v) && v >= 0 && v <= 15)){
+      throw new Error(`Offsets must be 0-15 on line ${i+1}. Got: ${ox} ${oy} ${oz}`);
     }
 
-    const row = {bx,by,bz,ox,oy,oz,kind};
+    const row = { bx, by, bz, ox, oy, oz, kind };
     if (kind === 'MANGROVE_PROPAGULE' && variantToken) row.propaguleModel = variantToken;
-    if (kind === 'CUBE') {
+    if (kind === 'CUBE'){
       let ct = variantToken ? String(variantToken).toUpperCase() : 'GRASS_BLOCK';
       if (!CUBE_BLOCK_TYPE_BY_TOKEN.has(ct)) ct = 'GRASS_BLOCK';
       row.cubeType = ct;
     }
+
     rows.push(row);
   }
+
   if (!rows.length) throw new Error('No grass data found.');
   return rows;
 }
+
+
 el.loadGrassData.addEventListener('click', () => {
   try{
     const rows = parseGrassDataStrict(el.grassDataIn.value);
@@ -4203,9 +4312,9 @@ function animate(){
   const renderTop  = (VIEW_H - RENDER_H) / 2;
   // Draw overlay first (never scaled), centered in the workspace.
   // This ensures all 3D helpers (including the grass overlay) render *on top* of the image overlay.
-  if (overlayVisible && overlayImage) {
-    const ox = Math.round((VIEW_W - overlayImage.naturalWidth) / 2);
-    const oy = Math.round((VIEW_H - overlayImage.naturalHeight) / 2);
+  if (overlayVisible && overlayHasImage()) {
+    const ox = Math.round((VIEW_W - overlayImageW) / 2);
+    const oy = Math.round((VIEW_H - overlayImageH) / 2);
     viewCtx.globalAlpha = overlayOpacity;
     viewCtx.drawImage(overlayImage, ox, oy);
     viewCtx.globalAlpha = 1;
