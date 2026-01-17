@@ -483,6 +483,10 @@ const el = {
   propaguleModel: document.getElementById('propaguleModel'),
   cubeControls: document.getElementById('cubeControls'),
   cubeBlockType: document.getElementById('cubeBlockType'),
+  seagrassFrameControls: document.getElementById('seagrassFrameControls'),
+  seagrassFramePrev: document.getElementById('seagrassFramePrev'),
+  seagrassFrameNext: document.getElementById('seagrassFrameNext'),
+  seagrassFrameLabel: document.getElementById('seagrassFrameLabel'),
   exportOffsets: document.getElementById('exportOffsets'),
   exportBox: document.getElementById('exportBox'),
   grassDataIn: document.getElementById('grassDataIn'),
@@ -1180,22 +1184,59 @@ function configureMcTexture(t){
 
 
 function fixAnimatedStripTexture(tex){
-  try{
+  try {
+    // Minecraft animated textures are usually vertical strips of 16x16 frames.
+    // For GUI preview we show a single frame by adjusting repeat/offset.
     const img = tex && tex.image;
     if (!img || !img.width || !img.height) return;
-    // Animated textures in Minecraft are stored as vertical strips of 16x16 frames.
-    // If we map the whole strip onto a quad it looks like horizontal "scanlines".
-    if (img.width === 16 && img.height > 16 && (img.height % 16) === 0) {
-      const frames = img.height / 16;
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(1, 1 / frames);
-      // three.js offset origin is bottom-left; pick frame 0 at the top.
-      tex.offset.set(0, 1 - tex.repeat.y);
-      tex.needsUpdate = true;
-    }
-  }catch(_){}
+
+    const frames = Math.round(img.height / img.width);
+    if (!Number.isFinite(frames) || frames <= 1) return;
+
+    // Store for manual frame selection (e.g. tall seagrass).
+    tex.userData = tex.userData || {};
+    tex.userData.__stripFrames = frames;
+    if (!Number.isFinite(tex.userData.__stripFrame)) tex.userData.__stripFrame = 0;
+
+    // Default to frame 0.
+    setAnimatedStripTextureFrame(tex, tex.userData.__stripFrame);
+  } catch (e) {
+    // ignore
+  }
 }
+
+function setAnimatedStripTextureFrame(tex, frameIndex, frameCountOverride = null){
+  try {
+    if (!tex) return;
+    const img = tex.image;
+    if (!img || !img.width || !img.height) return;
+
+    const detected = Math.round(img.height / img.width);
+    let frames = Number.isFinite(detected) ? detected : 1;
+    if (Number.isFinite(frameCountOverride) && frameCountOverride > 1) {
+      // Prefer the override if it matches the strip shape; otherwise fall back.
+      if (frames <= 1 || frames == frameCountOverride) frames = frameCountOverride;
+    }
+    if (!Number.isFinite(frames) || frames <= 1) return;
+
+    const n = Math.floor(frames);
+    const f = ((Math.floor(Number(frameIndex) || 0) % n) + n) % n;
+
+    tex.userData = tex.userData || {};
+    tex.userData.__stripFrames = n;
+    tex.userData.__stripFrame = f;
+
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.repeat.set(1, 1 / n);
+    // Frame 0 is at the top of the strip.
+    tex.offset.set(0, 1 - (f + 1) / n);
+    tex.needsUpdate = true;
+  } catch (e) {
+    // ignore
+  }
+}
+
 
 // A tiny placeholder so meshes don't flash white while textures stream in.
 // Fully transparent (1x1) so cutout geometry stays invisible until the real texture is ready.
@@ -1301,6 +1342,8 @@ async function refreshAllFoliageTextures(){
     }
   }
   await Promise.all(jobs);
+  // Re-apply manual animated frame selection (tall seagrass).
+  applyTallSeagrassFrameToCachedMats();
 }
 
 // Cache block model JSON by name (e.g. 'mangrove_propagule_hanging_0').
@@ -1313,6 +1356,18 @@ const modelJsonCache = new Map();
 //
 const LOCAL_MANGROVE_PROPAGULE_GROUND_MODEL = {"ambientocclusion":false,"textures":{"particle":"block/mangrove_propagule","sapling":"block/mangrove_propagule"},"elements":[{"name":"leaves","from":[4.5,9,8],"to":[11.5,15,8],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"north":{"uv":[4,1,11,7],"texture":"#sapling"},"south":{"uv":[4,1,11,7],"texture":"#sapling"}}},{"name":"leaves","from":[8,9,4.5],"to":[8,15,11.5],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"east":{"uv":[4,1,11,7],"texture":"#sapling"},"west":{"uv":[4,1,11,7],"texture":"#sapling"}}},{"name":"hypocotyl","from":[8,0,7],"to":[8,9,9],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"east":{"uv":[7,7,9,16],"texture":"#sapling"},"west":{"uv":[7,7,9,16],"texture":"#sapling"}}},{"name":"hypocotyl","from":[7,0,8],"to":[9,9,8],"rotation":{"angle":45,"axis":"y","origin":[8,0,8],"rescale":true},"faces":{"north":{"uv":[7,7,9,16],"texture":"#sapling"},"south":{"uv":[7,7,9,16],"texture":"#sapling"}}}]};
 modelJsonCache.set('mangrove_propagule', Promise.resolve(LOCAL_MANGROVE_PROPAGULE_GROUND_MODEL));
+
+// Local overrides: tall seagrass models (snapshot parity).
+// Sources:
+//  - https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/models/block/tall_seagrass_bottom.json
+//  - https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/models/block/tall_seagrass_top.json
+//  - https://mcasset.cloud/1.21.5/assets/minecraft/models/block/template_seagrass.json
+const LOCAL_TEMPLATE_SEAGRASS_MODEL = {"parent":"block/block","textures":{"particle":"#texture"},"elements":[{"from":[0,0,4],"to":[16,16,4],"faces":{"north":{"uv":[0,0,16,16],"texture":"#texture"},"south":{"uv":[0,0,16,16],"texture":"#texture"}}},{"from":[12,0,0],"to":[12,16,16],"faces":{"west":{"uv":[0,0,16,16],"texture":"#texture"},"east":{"uv":[0,0,16,16],"texture":"#texture"}}},{"from":[4,0,0],"to":[4,16,16],"faces":{"west":{"uv":[0,0,16,16],"texture":"#texture"},"east":{"uv":[0,0,16,16],"texture":"#texture"}}},{"from":[0,0,12],"to":[16,16,12],"faces":{"north":{"uv":[0,0,16,16],"texture":"#texture"},"south":{"uv":[0,0,16,16],"texture":"#texture"}}}],"shade":false};
+const LOCAL_TALL_SEAGRASS_BOTTOM_MODEL = {"parent":"block/template_seagrass","textures":{"texture":"block/tall_seagrass_bottom"}};
+const LOCAL_TALL_SEAGRASS_TOP_MODEL = {"parent":"block/template_seagrass","textures":{"texture":"block/tall_seagrass_top"}};
+modelJsonCache.set('template_seagrass', Promise.resolve(LOCAL_TEMPLATE_SEAGRASS_MODEL));
+modelJsonCache.set('tall_seagrass_bottom', Promise.resolve(LOCAL_TALL_SEAGRASS_BOTTOM_MODEL));
+modelJsonCache.set('tall_seagrass_top', Promise.resolve(LOCAL_TALL_SEAGRASS_TOP_MODEL));
 
 async function getBlockTexture(texName){
   const key = String(texName || '').trim();
@@ -1354,6 +1409,64 @@ function getBlockModelJSON(modelName){
     .then(r => (r && r.ok) ? r.json() : null)
     .catch(() => null);
   modelJsonCache.set(key, p);
+  return p;
+}
+
+// Cache for fully-resolved (parent-flattened) block models.
+// Many vanilla models are just {parent, textures} and rely on inheriting elements from the parent.
+const resolvedModelJsonCache = new Map();
+
+function normalizeParentModelName(parent){
+  let p = String(parent || '').trim();
+  if (!p) return '';
+  // Strip namespace.
+  const colon = p.indexOf(':');
+  if (colon >= 0) p = p.slice(colon + 1);
+  // Strip common folder prefixes.
+  if (p.startsWith('block/')) p = p.slice('block/'.length);
+  if (p.startsWith('item/')) p = p.slice('item/'.length);
+  // If still pathy, keep the leaf.
+  if (p.includes('/')) p = p.split('/').pop();
+  return p;
+}
+
+function getResolvedBlockModelJSON(modelName){
+  const key = String(modelName || '').trim();
+  if (!key) return Promise.resolve(null);
+  if (resolvedModelJsonCache.has(key)) return resolvedModelJsonCache.get(key);
+
+  const p = (async () => {
+    const model = await getBlockModelJSON(key);
+    if (!model) return null;
+
+    // Depth-limited parent resolution.
+    let cur = model;
+    let safety = 0;
+    while (cur && cur.parent && safety++ < 12) {
+      const parentName = normalizeParentModelName(cur.parent);
+      if (!parentName) break;
+      const parent = await getBlockModelJSON(parentName);
+      if (!parent) break;
+
+      // Merge parent -> child (child wins). Elements are inherited when absent.
+      const merged = JSON.parse(JSON.stringify(parent));
+      merged.textures = Object.assign({}, parent.textures || {}, cur.textures || {});
+      if (Array.isArray(cur.elements)) merged.elements = cur.elements;
+      if (cur.ambientocclusion !== undefined) merged.ambientocclusion = cur.ambientocclusion;
+      if (cur.gui_light !== undefined) merged.gui_light = cur.gui_light;
+      // Stop further resolution if the parent's already the same (avoid cycles).
+      if (merged.parent === cur.parent) delete merged.parent;
+      cur = merged;
+    }
+
+    // Drop parent key to avoid confusing later texture indirection resolution.
+    if (cur && cur.parent) {
+      // If we hit the safety limit, keep parent but it won't be used.
+    }
+    return cur;
+  })();
+
+  resolvedModelJsonCache.set(key, p);
   return p;
 }
 
@@ -1691,6 +1804,45 @@ function syncCubeControls(){
   if (el.cubeBlockType) el.cubeBlockType.value = String(activeCubeBlockType || 'GRASS_BLOCK').toUpperCase();
 }
 
+// Tall seagrass has an animated texture strip (19 frames).
+// The GUI defaults to frame 0, but allows manual stepping when tall seagrass is selected.
+const TALL_SEAGRASS_FRAME_COUNT = 19;
+let tallSeagrassFrame = 0;
+
+function foliageSupportsSeagrassFrame(foliageId){
+  return foliageId === 'TALL_SEAGRASS';
+}
+
+function updateSeagrassFrameLabel(){
+  if (el.seagrassFrameLabel) el.seagrassFrameLabel.textContent = `${tallSeagrassFrame + 1}/${TALL_SEAGRASS_FRAME_COUNT}`;
+}
+
+function applyTallSeagrassFrameToCachedMats(){
+  const mats = foliageMatCache.get('TALL_SEAGRASS');
+  if (!mats || mats.model !== 'double') return;
+  for (const m of [mats.baseBottom, mats.selectedBottom, mats.placementBottom]){
+    if (m && m.map) setAnimatedStripTextureFrame(m.map, tallSeagrassFrame, TALL_SEAGRASS_FRAME_COUNT);
+  }
+  for (const m of [mats.baseTop, mats.selectedTop, mats.placementTop]){
+    if (m && m.map) setAnimatedStripTextureFrame(m.map, tallSeagrassFrame, TALL_SEAGRASS_FRAME_COUNT);
+  }
+}
+
+function setTallSeagrassFrame(frame){
+  const n = TALL_SEAGRASS_FRAME_COUNT;
+  tallSeagrassFrame = ((frame % n) + n) % n;
+  updateSeagrassFrameLabel();
+  applyTallSeagrassFrameToCachedMats();
+}
+
+function syncSeagrassFrameControls(){
+  const box = el.seagrassFrameControls;
+  if (!box) return;
+  const show = foliageSupportsSeagrassFrame(activeFoliageId);
+  box.classList.toggle('hidden', !show);
+  if (show) updateSeagrassFrameLabel();
+}
+
 function getActiveVariantFor(foliageId){
   if (!foliageSupportsHeight(foliageId)) return null;
   const v = { height: activeVariantHeight|0 };
@@ -1731,6 +1883,7 @@ function setPlacementFoliage(id){
   showHideBambooUvControls();
   syncPropaguleControls();
   syncCubeControls();
+  syncSeagrassFrameControls();
 // If we are in placement mode, rebuild preview immediately.
   if (typeof placementMode !== 'undefined' && placementMode) {
     ensurePlacementOffsetRules();
@@ -1747,8 +1900,17 @@ populateFoliageSelect();
 showHideBambooUvControls();
 syncBambooUvUI();
 syncCubeControls();
+syncSeagrassFrameControls();
 
 updateOffsetUiMode();
+
+el.seagrassFramePrev?.addEventListener('click', () => {
+  setTallSeagrassFrame(tallSeagrassFrame - 1);
+});
+
+el.seagrassFrameNext?.addEventListener('click', () => {
+  setTallSeagrassFrame(tallSeagrassFrame + 1);
+});
 
 el.bambooUvU?.addEventListener('input', () => {
   bambooUvU = clampInt(el.bambooUvU.value, 0, 15);
@@ -2063,6 +2225,11 @@ function ensureFoliageMats(id){
       const tt = await getBlockTexture(mats.__texTop);
       for (const m of [baseBottom, selectedBottom, placementBottom]) { m.map = bt; m.needsUpdate = true; revealMaterialAfterLoad(m); }
       for (const m of [baseTop, selectedTop, placementTop]) { m.map = tt; m.needsUpdate = true; revealMaterialAfterLoad(m); }
+
+      // Tall seagrass: keep manual frame selection in sync.
+      if (key === 'TALL_SEAGRASS') {
+        applyTallSeagrassFrameToCachedMats();
+      }
     })();
 
     return mats;
@@ -2136,7 +2303,7 @@ function ensurePropaguleMats(variantKey){
   (async () => {
     // Prefer the texture referenced by the model JSON itself (more robust than manual mapping).
     const modelName = propaguleModelToBlockModelName(v);
-    const model = await getBlockModelJSON(modelName);
+    const model = await getResolvedBlockModelJSON(modelName);
     const inferred = textureNameFromMcModel(model);
     const texKey = inferred || mats.__tex;
     const t = await getBlockTexture(texKey);
@@ -2412,7 +2579,7 @@ function makeAsyncMinecraftModelMesh(modelName, material, opts = undefined){
   root.userData.__isGrassPart = true;
 
   (async () => {
-    const model = await getBlockModelJSON(modelName);
+    const model = await getResolvedBlockModelJSON(modelName);
     if (!model) return;
     // Remove any old children and rebuild.
     while (root.children.length) {
@@ -2421,6 +2588,15 @@ function makeAsyncMinecraftModelMesh(modelName, material, opts = undefined){
     }
     const built = buildMinecraftModelGroup(model, material, opts);
     root.add(...built.children);
+
+    // Some models are built asynchronously (e.g., tall seagrass top/bottom, sunflower top).
+    // If something is currently selected, re-apply selection materials now that real meshes exist.
+    // (Otherwise the selected tint would only appear after the next interaction.)
+    try {
+      if (typeof selectedId !== 'undefined' && selectedId != null) setSelected(selectedId);
+    } catch (_) {
+      // ignore
+    }
   })();
 
   return root;
@@ -2563,11 +2739,40 @@ function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
     return makeSunflowerDoubleMesh(mats.placementBottom, mats.placementTop);
   }
 
+  // Tall seagrass uses vanilla tall_seagrass_bottom/top models (template_seagrass geometry).
+  if (foliageId === 'TALL_SEAGRASS') {
+    return makeTallSeagrassDoubleMesh(mats.placementBottom, mats.placementTop);
+  }
+
   if (mats.model === 'double') {
     return makeTallGrassMesh(mats.placementBottom, mats.placementTop);
   }
   return makeGrassMesh(mats.placement);
 }
+
+function makeTallSeagrassDoubleMesh(bottomMat, topMat){
+  const root = new THREE.Group();
+
+  const bottom = makeAsyncMinecraftModelMesh('tall_seagrass_bottom', bottomMat);
+  bottom.position.set(0, 0, 0);
+  bottom.userData.__tallPart = 'bottom';
+  bottom.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'bottom'; });
+
+  const top = makeAsyncMinecraftModelMesh('tall_seagrass_top', topMat);
+  top.position.set(0, 1, 0);
+  top.userData.__tallPart = 'top';
+  top.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'top'; });
+
+  root.add(bottom);
+  root.add(top);
+
+  root.traverse(obj => {
+    if (obj.isMesh) obj.userData.__isGrassPart = true;
+  });
+
+  return root;
+}
+
 
 function makeSunflowerDoubleMesh(bottomMat, topMat){
   const root = new THREE.Group();
@@ -2953,7 +3158,18 @@ function setSelected(id){
     if (model === 'double') {
       g.mesh.traverse(obj => {
         if (!obj.isMesh) return;
-        const part = obj.userData.__tallPart;
+
+        // Some double-height plants are built asynchronously (e.g., tall seagrass) so
+        // the Meshes themselves may not carry __tallPart. Walk up ancestors to find it.
+        let part = obj.userData.__tallPart;
+        if (!part) {
+          let p = obj.parent;
+          for (let i = 0; i < 8 && p; i++) {
+            if (p.userData && p.userData.__tallPart) { part = p.userData.__tallPart; break; }
+            p = p.parent;
+          }
+        }
+
         if (isSel) obj.material = (part === 'top') ? mats.selectedTop : mats.selectedBottom;
         else obj.material = (part === 'top') ? mats.baseTop : mats.baseBottom;
       });
@@ -2994,6 +3210,17 @@ function setSelected(id){
 			el.cubeControls.classList.add('hidden');
 		}
 	}
+
+  // Tall seagrass: show frame step controls when a tall seagrass instance is selected.
+  if (g.kind === 'TALL_SEAGRASS') {
+    if (el.seagrassFrameControls) el.seagrassFrameControls.classList.remove('hidden');
+    updateSeagrassFrameLabel();
+  } else {
+    if (!foliageSupportsSeagrassFrame(activeFoliageId) && el.seagrassFrameControls) {
+      el.seagrassFrameControls.classList.add('hidden');
+    }
+  }
+
 
   // Selected texture block position (separate from "active block")
   el.selBlockX.value = String(g.block.x);
@@ -3064,6 +3291,8 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   } else if (kind === 'SUNFLOWER') {
     // Sunflower top is not a second stalk cross; it uses sunflower_top.json with multiple textures.
     mesh = makeSunflowerDoubleMesh(mats.baseBottom, mats.baseTop);
+  } else if (kind === 'TALL_SEAGRASS') {
+    mesh = makeTallSeagrassDoubleMesh(mats.baseBottom, mats.baseTop);
   } else {
     mesh = (model === 'double')
       ? makeTallGrassMesh(mats.baseBottom, mats.baseTop)
@@ -3412,6 +3641,108 @@ el.clearGrass.addEventListener('click', () => {
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 
+// "Alpha-aware" picking:
+// Three.js raycasting hits triangles even where the texture is fully transparent.
+// For plant-style blocks (grass, flowers, seagrass, etc.), this feels wrong: you
+// shouldn't be able to select a model by clicking an area where there are no
+// visible (non-transparent) pixels.
+//
+// We solve this by filtering raycast hits using the hit UV and the texture's
+// alpha channel. If the sampled pixel would be discarded by alphaTest, we treat
+// that hit as "empty" and continue to the next object behind it.
+const __texAlphaCache = new Map(); // texture.uuid -> { w, h, data }
+
+function __getTextureImageData(tex){
+  try {
+    if (!tex || !tex.image) return null;
+    const img = tex.image;
+    const w = img.width | 0;
+    const h = img.height | 0;
+    if (!w || !h) return null;
+
+    const key = tex.uuid;
+    const cached = __texAlphaCache.get(key);
+    if (cached && cached.w === w && cached.h === h) return cached;
+
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const id = ctx.getImageData(0, 0, w, h);
+    const entry = { w, h, data: id.data };
+    __texAlphaCache.set(key, entry);
+    return entry;
+  } catch (e) {
+    // If the image is not CORS-readable (tainted canvas), we can't do alpha picking.
+    return null;
+  }
+}
+
+function __materialForHit(hit){
+  const obj = hit?.object;
+  if (!obj) return null;
+  const mat = obj.material;
+  if (!Array.isArray(mat)) return mat;
+
+  // Multi-material BufferGeometry: determine which group contains this face.
+  const geo = obj.geometry;
+  const groups = geo?.groups;
+  const fi = hit.faceIndex;
+  if (!groups || !groups.length || fi == null) return mat[0] ?? null;
+
+  // For non-indexed geometries (ours), group.start/count are in vertices.
+  // faceIndex is triangle index; triangle i uses vertices [i*3 .. i*3+2].
+  const vert = (fi | 0) * 3;
+  for (const g of groups){
+    const s = g.start | 0;
+    const e = s + (g.count | 0);
+    if (vert >= s && vert < e) return mat[g.materialIndex] ?? mat[0] ?? null;
+  }
+  return mat[0] ?? null;
+}
+
+function __hitIsOpaqueEnough(hit){
+  const obj = hit?.object;
+  if (!obj) return true;
+  const mat = __materialForHit(hit);
+  const map = mat?.map;
+  const uv = hit?.uv;
+  if (!map || !uv) return true;
+
+  const info = __getTextureImageData(map);
+  if (!info) return true; // no readable data -> fall back to triangle pick
+
+  // Apply texture transform (repeat/offset/rotation/center) so animated-strip frames
+  // and any future UV transforms are respected.
+  let u = uv.x;
+  let v = uv.y;
+  try {
+    if (map.matrixAutoUpdate) map.updateMatrix();
+    const uv2 = uv.clone().applyMatrix3(map.matrix);
+    u = uv2.x;
+    v = uv2.y;
+  } catch (_) {
+    // ignore and fall back to raw UV
+  }
+
+  // Clamp to edge (Minecraft plant textures use clamp in this app).
+  if (!Number.isFinite(u) || !Number.isFinite(v)) return true;
+  u = Math.min(1, Math.max(0, u));
+  v = Math.min(1, Math.max(0, v));
+
+  const x = Math.min(info.w - 1, Math.max(0, Math.floor(u * info.w)));
+  // ImageData has origin at top-left; our UV v=1 is top, v=0 is bottom.
+  const y = Math.min(info.h - 1, Math.max(0, Math.floor((1 - v) * info.h)));
+
+  const a = info.data[(y * info.w + x) * 4 + 3] | 0;
+  const alphaTest = (typeof mat?.alphaTest === 'number') ? mat.alphaTest : 0.5;
+  const thresh = Math.floor(Math.max(0, Math.min(1, alphaTest)) * 255);
+  return a >= thresh;
+}
+
 function setNDCFromMouseEvent(e){
   // Map viewport-canvas mouse coordinates -> workspace coordinates -> NDC in the render rectangle.
   // If the mouse is outside the render rectangle, return false.
@@ -3434,10 +3765,16 @@ function pickGrass(e){
   grassGroup.traverse(obj => { if (obj.isMesh) meshes.push(obj); });
   const hits = raycaster.intersectObjects(meshes, false);
   if (!hits.length) return null;
-  let obj = hits[0].object;
-  while (obj && !obj.parent?.userData?.__grassId && !obj.userData.__grassId) obj = obj.parent;
-  const id = obj?.userData?.__grassId ?? obj?.parent?.userData?.__grassId;
-  return (typeof id === 'number') ? id : null;
+
+  // Find the nearest hit that is not "empty" in alpha space.
+  for (const hit of hits){
+    if (!__hitIsOpaqueEnough(hit)) continue;
+    let obj = hit.object;
+    while (obj && !obj.parent?.userData?.__grassId && !obj.userData.__grassId) obj = obj.parent;
+    const id = obj?.userData?.__grassId ?? obj?.parent?.userData?.__grassId;
+    if (typeof id === 'number') return id;
+  }
+  return null;
 }
 
 function pickBlockOnGround(e){

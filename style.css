@@ -490,6 +490,19 @@ footer.disclaimer{
   color:#fff;
 }
 
+.variant-controls .frame-btn{
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1;
+}
+.variant-controls .frame-label{
+  min-width: 42px;
+  text-align: center;
+  color: rgba(255,255,255,0.85);
+  font-variant-numeric: tabular-nums;
+}
+
 
 /* Top-right toggle over the canvas */
 .canvas-topright{
