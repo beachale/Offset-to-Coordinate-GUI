@@ -531,3 +531,29 @@ footer.disclaimer{
   transform: translateY(1px);
 }
 
+.canvas-topright .rp-controls{
+  background: rgba(20,20,20,0.75);
+  border: 1px solid rgba(255,255,255,0.12);
+  padding: 6px 10px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.canvas-topright .rp-controls input[type="file"]{
+  display:none;
+}
+.canvas-topright .rp-controls button{
+  padding: 6px 9px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.canvas-topright .rp-name{
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255,255,255,0.75);
+  font-size: 11px;
+}
+

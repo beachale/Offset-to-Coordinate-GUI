@@ -182,6 +182,12 @@
     <main class="workspace" aria-label="Workspace">
       <div class="viewport" aria-label="Viewport (960×540)">
         <div class="canvas-topright">
+          <div class="rp-controls" title="Load a Minecraft resource pack (zip). Textures/models inside will override the defaults.">
+            <input id="resourcePackFile" type="file" accept=".zip,application/zip" />
+            <button id="resourcePackLoad" type="button">Load pack</button>
+            <button id="resourcePackUnload" type="button" class="hidden">Unload</button>
+            <span id="resourcePackName" class="rp-name hidden"></span>
+          </div>
           <label class="toggle progart"><input id="progArtToggle" type="checkbox" /> Programmer Art</label>
           <label class="toggle msaa" title="Multisample anti-aliasing"><input id="msaaToggle" type="checkbox" checked /> MSAA</label>
         </div>

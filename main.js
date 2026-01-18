@@ -49,8 +49,123 @@ const PROGRAMMER_ART_KEYS = new Set(Object.keys(PROGRAMMER_ART_URLS));
 let useProgrammerArt = false;
 let useMSAA = true; // WebGLRenderer antialias (MSAA)
 
+// --- Custom resource pack support (textures + models from a resource pack zip) ---
+let resourcePackGeneration = 0;
+/** @type {{name:string, textures:Map<string,string>, models:Map<string,any>, urlsToRevoke:string[]} | null} */
+let activeResourcePack = null;
+
+function resourcePackTextureUrl(key){
+  const rp = activeResourcePack;
+  if (!rp) return null;
+  const k = String(key || '').trim();
+  const kl = k.toLowerCase();
+  return rp.textures.get(k) || rp.textures.get(kl) || null;
+}
+
+function resourcePackModelJson(key){
+  const rp = activeResourcePack;
+  if (!rp) return null;
+  const k = String(key || '').trim();
+  const kl = k.toLowerCase();
+  return rp.models.get(k) || rp.models.get(kl) || null;
+}
+
+function revokeActiveResourcePackUrls(){
+  const rp = activeResourcePack;
+  if (!rp || !rp.urlsToRevoke) return;
+  for (const u of rp.urlsToRevoke){
+    try { URL.revokeObjectURL(u); } catch (_) {}
+  }
+}
+
+let _zipLibPromise = null;
+async function getZipLib(){
+  if (_zipLibPromise) return _zipLibPromise;
+  _zipLibPromise = import('https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js')
+    .catch(() => import('https://unpkg.com/fflate@0.8.2/esm/browser.js'));
+  return _zipLibPromise;
+}
+
+async function unzipToEntries(file){
+  const lib = await getZipLib();
+  const u8 = new Uint8Array(await file.arrayBuffer());
+  return await new Promise((resolve, reject) => {
+    try {
+      lib.unzip(u8, (err, data) => err ? reject(err) : resolve({ data, lib }));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function loadResourcePackZip(file){
+  if (!file) return null;
+  const name = String(file.name || 'resource_pack.zip');
+  const { data } = await unzipToEntries(file);
+  const dec = new TextDecoder('utf-8');
+
+  const textures = new Map();
+  const models = new Map();
+  const urlsToRevoke = [];
+
+  for (const fn of Object.keys(data || {})) {
+    const rawName = String(fn || '').replace(/\\/g, '/');
+    const lower = rawName.toLowerCase();
+    const bytes = data[fn];
+
+    // Textures: we index by filename (leaf) without extension.
+    // Example: assets/minecraft/textures/block/grass_block_top.png -> key 'grass_block_top'
+    //
+    // NOTE: This tool only consumes *block* textures. Resource packs can contain the same
+    // filename in multiple folders (e.g. textures/painting/fern.png vs textures/block/fern.png).
+    // To avoid collisions where the wrong asset is picked, we only ingest overrides from:
+    //   assets/minecraft/textures/block/
+    if (lower.includes('assets/minecraft/textures/block/') && lower.endsWith('.png')) {
+      const base = rawName.split('/').pop() || '';
+      const key = base.replace(/\.png$/i, '').toLowerCase();
+      if (!key) continue;
+      try {
+        const blob = new Blob([bytes], { type: 'image/png' });
+        const url = URL.createObjectURL(blob);
+        textures.set(key, url);
+        urlsToRevoke.push(url)
+      } catch (e) {
+        console.warn('[Resource Pack] Failed to register texture', rawName, e);
+      }
+      continue;
+    }
+
+    // Models: index by leaf name (e.g. 'sunflower_top')
+    if (lower.includes('assets/minecraft/models/') && lower.endsWith('.json')) {
+      const base = rawName.split('/').pop() || '';
+      const key = base.replace(/\.json$/i, '').toLowerCase();
+      if (!key) continue;
+      try {
+        const txt = dec.decode(bytes);
+        const obj = JSON.parse(txt);
+        models.set(key, obj);
+      } catch (e) {
+        console.warn('[Resource Pack] Bad JSON model:', rawName, e);
+      }
+    }
+  }
+
+  return { name, textures, models, urlsToRevoke };
+}
+
+function setActiveResourcePack(rp){
+  revokeActiveResourcePackUrls();
+  activeResourcePack = rp;
+  resourcePackGeneration++;
+}
+
 function blockTextureUrl(key){
   const k = String(key || '').trim();
+  // If a resource pack is loaded, it overrides all default textures.
+  const rpUrl = resourcePackTextureUrl(k);
+  if (rpUrl) return rpUrl;
+
+  // Fallback: built-in Programmer Art toggle for a small curated set.
   if (useProgrammerArt && PROGRAMMER_ART_KEYS.has(k)) return PROGRAMMER_ART_URLS[k];
   return `${MC_ASSETS_BLOCK_TEX_BASE}${encodeURIComponent(k)}.png`;
 }
@@ -425,6 +540,10 @@ const el = {
   viewport: document.querySelector('.viewport'),
   progArtToggle: document.getElementById('progArtToggle'),
   msaaToggle: document.getElementById('msaaToggle'),
+  resourcePackFile: document.getElementById('resourcePackFile'),
+  resourcePackLoad: document.getElementById('resourcePackLoad'),
+  resourcePackUnload: document.getElementById('resourcePackUnload'),
+  resourcePackName: document.getElementById('resourcePackName'),
   tpInput: document.getElementById('tpInput'),
   tpGo: document.getElementById('tpGo'),
   tpMsg: document.getElementById('tpMsg'),
@@ -1169,6 +1288,209 @@ if (el.msaaToggle){
 }
 syncMsaaToggle();
 
+// --- Resource pack UI wiring ---
+let resourcePackLoading = false;
+
+function syncResourcePackUI(){
+  const on = !!activeResourcePack;
+  if (el.resourcePackUnload) el.resourcePackUnload.classList.toggle('hidden', !on);
+  if (el.resourcePackName) {
+    el.resourcePackName.classList.toggle('hidden', !on);
+    el.resourcePackName.textContent = on ? String(activeResourcePack.name || 'resource_pack.zip').replace(/\.zip$/i, '') : '';
+  }
+  if (el.resourcePackLoad) el.resourcePackLoad.textContent = on ? 'Replace pack' : 'Load pack';
+
+  // When a custom pack is loaded, it fully overrides textures; keep the Programmer Art toggle disabled.
+  if (el.progArtToggle) {
+    el.progArtToggle.disabled = on;
+    if (on) {
+      el.progArtToggle.checked = false;
+      useProgrammerArt = false;
+    }
+  }
+}
+
+function disposeCachedTextures(){
+  for (const v of textureCache.values()) {
+    try {
+      // v can be a Promise during streaming.
+      if (v && typeof v.then !== 'function' && v !== PLACEHOLDER_TEX && v.dispose) v.dispose();
+    } catch (_) {}
+  }
+  textureCache.clear();
+}
+
+function resetAssetCachesForPackSwitch(){
+  try { disposeCachedTextures(); } catch (_) {}
+  try { modelJsonCache.clear(); } catch (_) {}
+  try { resolvedModelJsonCache.clear(); } catch (_) {}
+
+  // Re-seed local model overrides (used as fallbacks when a pack doesn't include them).
+  try {
+    modelJsonCache.set('mangrove_propagule', Promise.resolve(LOCAL_MANGROVE_PROPAGULE_GROUND_MODEL));
+    modelJsonCache.set('template_seagrass', Promise.resolve(LOCAL_TEMPLATE_SEAGRASS_MODEL));
+  } catch (_) {}
+}
+
+function disposeMeshGeometries(root){
+  if (!root) return;
+  root.traverse(o => {
+    try { if (o.isMesh && o.geometry && o.geometry.dispose) o.geometry.dispose(); } catch (_) {}
+  });
+}
+
+function rebuildAllPlacedGrassMeshes(){
+  // Defensive: grasses/grassGroup may not exist yet during early boot.
+  try {
+    if (typeof grasses === 'undefined' || !grasses || typeof grassGroup === 'undefined' || !grassGroup) return;
+  } catch (_) { return; }
+
+  const keepSelected = (typeof selectedId !== 'undefined') ? selectedId : null;
+
+  // Remove existing meshes.
+  for (const g of grasses.values()) {
+    if (!g || !g.mesh) continue;
+    try { grassGroup.remove(g.mesh); } catch (_) {}
+    try { disposeMeshGeometries(g.mesh); } catch (_) {}
+    g.mesh = null;
+  }
+
+  // Rebuild meshes using current materials + current model/texture sources.
+  for (const g of grasses.values()) {
+    if (!g) continue;
+    let mesh = null;
+    const kind = String(g.kind || 'SHORT_GRASS');
+
+    try {
+      if (kind === 'CUBE') {
+        const cmats = ensureCubeMats();
+        const t = String(g.cubeType || 'GRASS_BLOCK');
+        const modelName = ensureCubeModelRegistered(t);
+        mesh = makeAsyncMinecraftModelMesh(modelName, cmats.base, { perFaceMaterials: true });
+      } else if (kind === 'BAMBOO') {
+        const mats = ensureFoliageMats(kind);
+        const h = Math.max(1, Math.min(16, Math.trunc(g.variant?.height ?? 1)));
+        mesh = makeBambooMesh(mats.base, h);
+      } else if (kind === 'POINTED_DRIPSTONE') {
+        const mats = ensureFoliageMats(kind);
+        const h = Math.max(1, Math.min(16, Math.trunc(g.variant?.height ?? 1)));
+        const dir = String(g.variant?.dir || 'up');
+        mesh = makeDripstoneStackMesh(mats.base, h, dir, { preview: false });
+      } else if (kind === 'MANGROVE_PROPAGULE') {
+        const v = String(g.propaguleModel || 'ground');
+        const pmats = ensurePropaguleMats(v);
+        const modelName = propaguleModelToBlockModelName(v);
+        mesh = makeAsyncMinecraftModelMesh(modelName, pmats.base);
+      } else if (kind === 'SUNFLOWER') {
+        const mats = ensureFoliageMats(kind);
+        mesh = makeSunflowerDoubleMesh(mats.baseBottom, mats.baseTop);
+      } else if (kind === 'TALL_SEAGRASS') {
+        const mats = ensureFoliageMats(kind);
+        mesh = makeTallSeagrassDoubleMesh(mats.baseBottom, mats.baseTop);
+      } else {
+        const mats = ensureFoliageMats(kind);
+        if (mats && mats.model === 'double') mesh = makeTallGrassMesh(mats.baseBottom, mats.baseTop);
+        else mesh = makeGrassMesh(mats.base);
+      }
+    } catch (e) {
+      console.warn('[Resource Pack] Failed to rebuild mesh for', g, e);
+      try {
+        const mats = ensureFoliageMats('SHORT_GRASS');
+        mesh = makeGrassMesh(mats.base);
+      } catch (_) {
+        mesh = new THREE.Group();
+      }
+    }
+
+    if (!mesh) mesh = new THREE.Group();
+    mesh.userData.__grassId = g.id;
+    g.mesh = mesh;
+    grassGroup.add(mesh);
+    try { updateGrassMeshTransform(g); } catch (_) {}
+  }
+
+  // Re-apply selection tint.
+  try { if (keepSelected != null) setSelected(keepSelected); } catch (_) {}
+
+  // Placement preview (if any) must also be rebuilt to pick up new models/textures.
+  try {
+    if (typeof placementPreview !== 'undefined' && placementPreview) {
+      placementPreview.userData.__previewKey = '__forcePack__' + Math.random();
+      ensurePlacementPreview();
+      if (!placementMode && placementPreview) placementPreview.visible = false;
+      if (placementMode && placementPreview) {
+        const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
+        placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
+        updatePlacementPreviewBlockedState();
+      }
+    }
+  } catch (_) {}
+}
+
+async function applyResourcePackSwitch(){
+  resetAssetCachesForPackSwitch();
+  try { await refreshAllFoliageTextures(); } catch (_) {}
+  try { rebuildAllPlacedGrassMeshes(); } catch (_) {}
+  try { syncSpecialModelOpacity(); } catch (_) {}
+}
+
+async function handleResourcePackFile(file){
+  if (!file) return;
+  if (resourcePackLoading) return;
+  resourcePackLoading = true;
+  syncResourcePackUI();
+  try {
+    const rp = await loadResourcePackZip(file);
+    if (!rp) throw new Error('No resource pack data');
+    if ((rp.textures?.size || 0) === 0 && (rp.models?.size || 0) === 0) {
+      console.warn('[Resource Pack] Zip contained no usable assets (assets/minecraft/textures or models).');
+    }
+    setActiveResourcePack(rp);
+    useProgrammerArt = false;
+    if (el.progArtToggle) el.progArtToggle.checked = false;
+    syncResourcePackUI();
+    await applyResourcePackSwitch();
+    try { showPlacementMsg(`Loaded resource pack: ${rp.name}`, 1800); } catch (_) {}
+  } catch (e) {
+    console.warn('[Resource Pack] Failed to load', e);
+    try { showPlacementMsg('Failed to load resource pack zip. See console for details.', 2200); } catch (_) {}
+  } finally {
+    resourcePackLoading = false;
+    syncResourcePackUI();
+  }
+}
+
+function unloadResourcePack(){
+  setActiveResourcePack(null);
+  syncResourcePackUI();
+  applyResourcePackSwitch();
+  try { showPlacementMsg('Unloaded resource pack.', 1400); } catch (_) {}
+}
+
+// Button wiring
+if (el.resourcePackLoad && el.resourcePackFile) {
+  el.resourcePackLoad.addEventListener('click', () => {
+    if (resourcePackLoading) return;
+    el.resourcePackFile.click();
+  });
+}
+if (el.resourcePackFile) {
+  el.resourcePackFile.addEventListener('change', async () => {
+    const f = el.resourcePackFile.files && el.resourcePackFile.files[0];
+    // allow re-selecting the same file
+    el.resourcePackFile.value = '';
+    await handleResourcePackFile(f);
+  });
+}
+if (el.resourcePackUnload) {
+  el.resourcePackUnload.addEventListener('click', () => {
+    if (resourcePackLoading) return;
+    unloadResourcePack();
+  });
+}
+
+syncResourcePackUI();
+
 const texLoader = new THREE.TextureLoader();
 texLoader.setCrossOrigin('anonymous');
 
@@ -1402,6 +1724,11 @@ async function getBlockTexture(texName){
 function getBlockModelJSON(modelName){
   const key = String(modelName || '').trim();
   if (!key) return Promise.resolve(null);
+
+  // Resource pack overrides (if loaded).
+  const rpModel = resourcePackModelJson(key);
+  if (rpModel) return Promise.resolve(rpModel);
+
   if (modelJsonCache.has(key)) return modelJsonCache.get(key);
 
   const url = `${MC_ASSETS_BLOCK_MODEL_BASE}${encodeURIComponent(key)}.json`;
@@ -1433,7 +1760,10 @@ function normalizeParentModelName(parent){
 function getResolvedBlockModelJSON(modelName){
   const key = String(modelName || '').trim();
   if (!key) return Promise.resolve(null);
-  if (resolvedModelJsonCache.has(key)) return resolvedModelJsonCache.get(key);
+
+  // Cache must be invalidated when a resource pack is (un)loaded.
+  const cacheKey = `${resourcePackGeneration}|${key}`;
+  if (resolvedModelJsonCache.has(cacheKey)) return resolvedModelJsonCache.get(cacheKey);
 
   const p = (async () => {
     const model = await getBlockModelJSON(key);
@@ -1466,7 +1796,7 @@ function getResolvedBlockModelJSON(modelName){
     return cur;
   })();
 
-  resolvedModelJsonCache.set(key, p);
+  resolvedModelJsonCache.set(cacheKey, p);
   return p;
 }
 
