@@ -574,6 +574,7 @@ const el = {
   gridRadius: document.getElementById('gridRadius'),
   gridRadiusLabel: document.getElementById('gridRadiusLabel'),
   showGrass: document.getElementById('showGrass'),
+  showBorder: document.getElementById('showBorder'),
 
   offX: document.getElementById('offX'),
   offY: document.getElementById('offY'),
@@ -4958,10 +4959,10 @@ function syncSpecialModelOpacity(){
 // --- Render loop ---
 function animate(){
   updateCameraFromUI();
-  // Render the 3D scene to the offscreen WebGL canvas (RENDER_WÃ—RENDER_H).
+  // Render the 3D scene to the offscreen WebGL canvas (RENDER_W×RENDER_H).
   renderer.render(scene, camera);
 
-  // Composite into the fixed 960Ã—540 viewport canvas with pan/zoom.
+  // Composite into the fixed 960×540 viewport canvas with pan/zoom.
   const cw = viewCanvas.clientWidth || 960;
   const ch = viewCanvas.clientHeight || 540;
   if (viewCanvas.width !== cw) viewCanvas.width = cw;
@@ -4989,6 +4990,31 @@ function animate(){
 
   // Draw 3D render on top
   viewCtx.drawImage(webglCanvas, renderLeft, renderTop, RENDER_W, RENDER_H);
+
+  // Fixed-thickness (screen-space) border around the 3D render area.
+  // This stays 1px no matter how much you zoom/pan, while the rectangle resizes with resolution.
+  if (Boolean(el.showBorder?.checked)) {
+    const sx = (renderLeft - roundedCenterX) * zoom + (viewCanvas.width / 2);
+    const sy = (renderTop  - roundedCenterY) * zoom + (viewCanvas.height / 2);
+    const sw = RENDER_W * zoom;
+    const sh = RENDER_H * zoom;
+
+    const x = Math.round(sx) + 0.5;
+    const y = Math.round(sy) + 0.5;
+    const w = Math.round(sw) - 1;
+    const h = Math.round(sh) - 1;
+
+    if (w > 0 && h > 0) {
+      viewCtx.save();
+      viewCtx.setTransform(1, 0, 0, 1, 0, 0);
+      viewCtx.globalAlpha = 1;
+      viewCtx.strokeStyle = '#ffffff';
+      viewCtx.lineWidth = 1;
+      viewCtx.strokeRect(x, y, w, h);
+      viewCtx.restore();
+    }
+  }
+
   requestAnimationFrame(animate);
 }
 animate();
