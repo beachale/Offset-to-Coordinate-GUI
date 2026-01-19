@@ -1164,7 +1164,8 @@ feet  = (${x.toFixed(3)}, ${yFeet.toFixed(3)}, ${z.toFixed(3)})
 yaw   = ${yaw.toFixed(3)}Â°   (0=+Z/south, -90=+X/east)
 pitch = ${pitch.toFixed(3)}Â° (+=down, -=up)
 fov   = ${fov.toFixed(3)}Â°   (vertical)
-old nudge = ${useOldNudge ? '+0.05' : 'off'}`;
+old nudge = ${useOldNudge ? '+0.05' : 'off'}
+really old nudge = ${useReallyOldNudge ? '-0.10' : 'off'}`;
   } else {
     el.readout.textContent =
 `Minecraft-style camera
@@ -1172,7 +1173,8 @@ pos   = (${x.toFixed(3)}, ${yEye.toFixed(3)}, ${z.toFixed(3)})   [blocks]
 yaw   = ${yaw.toFixed(3)}Â°   (0=+Z/south, -90=+X/east)
 pitch = ${pitch.toFixed(3)}Â° (+=down, -=up)
 fov   = ${fov.toFixed(3)}Â°   (vertical)
-old nudge = ${useOldNudge ? '+0.05' : 'off'}`;
+old nudge = ${useOldNudge ? '+0.05' : 'off'}
+really old nudge = ${useReallyOldNudge ? '-0.10' : 'off'}`;
   }
 
   // Keep helper visuals centered around the player (3x3 chunks) and prevent the grid/borders from stopping at +/-32.
@@ -1299,7 +1301,7 @@ function syncResourcePackUI(){
     el.resourcePackName.classList.toggle('hidden', !on);
     el.resourcePackName.textContent = on ? String(activeResourcePack.name || 'resource_pack.zip').replace(/\.zip$/i, '') : '';
   }
-  if (el.resourcePackLoad) el.resourcePackLoad.textContent = on ? 'Replace pack' : 'Load pack';
+  if (el.resourcePackLoad) el.resourcePackLoad.textContent = on ? 'Replace pack' : 'Load resource pack';
 
   // When a custom pack is loaded, it fully overrides textures; keep the Programmer Art toggle disabled.
   if (el.progArtToggle) {
@@ -3817,8 +3819,8 @@ function parseGrassDataStrict(text){
   for (let i = 0; i < lines.length; i++){
     // Accept ANY whitespace-separated columns (spaces/tabs), including fixed-width padded columns.
     // Format:
-    //   blockX blockY blockZ  offX offY offZ  [KIND] [variant]
-    // KIND is optional and defaults to SHORT_GRASS.
+	    //   blockX blockY blockZ  offX offY offZ  [TYPE] [variant]
+	    // TYPE is optional and defaults to SHORT_GRASS.
     let raw = String(lines[i] || '').trim();
     if (!raw) continue;
 
@@ -3829,7 +3831,7 @@ function parseGrassDataStrict(text){
     // Tokenize by whitespace (handles "lots of spaces" and tabs).
     const parts = raw.split(/\s+/);
     if (parts.length < 6){
-      throw new Error(`Invalid format on line ${i+1}. Expected: blockX blockY blockZ offX offY offZ [KIND]`);
+	      throw new Error(`Invalid format on line ${i+1}. Expected: blockX blockY blockZ offX offY offZ [TYPE]`);
     }
 
     // Parse the six required integers.

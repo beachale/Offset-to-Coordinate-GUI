@@ -40,7 +40,7 @@
         <div class="row fov-nudge">
           <div class="fov-warning">Use nudge toggle if using an old Minecraft screenshot with in-game F3 coords to account for camera nudge</div>
           <label class="toggle"><input id="oldCamNudge" type="checkbox" /> Old Minecraft camera nudge (+0.05)</label>
-        <label class="toggle"><input id="reallyOldCamNudge" type="checkbox" /> Really old Minecraft camera nudge (-0.10)</label>
+          <label class="toggle"><input id="reallyOldCamNudge" type="checkbox" /> Really old Minecraft camera nudge (-0.10)</label>
         </div>
 
         <div class="row">
@@ -52,7 +52,6 @@
           <label>Render W <input id="renderW" type="number" step="1" value="960" /></label>
           <label>Render H <input id="renderH" type="number" step="1" value="540" /></label>
           <button id="applyViewSize" type="button">Apply resolution</button>
-          <button id="sizeToOverlay" type="button" title="Set resolution to the loaded overlay image">Size = overlay</button>
           <label class="file">
             Overlay image (any size)
             <input id="overlayFile" type="file" accept="image/png,image/jpeg,image/bmp,.bmp" />
@@ -84,7 +83,6 @@
             <div><b>Right click again</b>: confirm placement</div>
             <div><b>WASD / arrow keys</b>: move the selected offset X/Z (snaps to valid steps)</div>
             <div><b>R / F</b>: adjust offset Y (0–15)</div>
-            <div><b>Enter</b>: confirm selection (no-op, keeps values)</div>
           </div>
         </div>
 
@@ -121,12 +119,12 @@
         <div class="row">
           <button id="exportOffsets" type="button">Export offsets</button>
           <button id="clearGrass" type="button">Clear</button>
-          <span class="hint">Export format: <code>blockX blockY blockZ  offX offY offZ KIND</code> (one per line)</span>
+          <span class="hint">Export format: <code>blockX blockY blockZ  offX offY offZ TYPE</code> (one per line)</span>
         </div>
 
         <div class="row" style="margin-top:10px;">
           <label for="grassDataIn">Offset data input (strict)</label>
-          <span class="hint">Paste lines in format: <code>blockX blockY blockZ  offX offY offZ KIND</code> (KIND optional; offsets 0–15)</span>
+          <span class="hint">Paste lines in format: <code>blockX blockY blockZ  offX offY offZ TYPE</code> (TYPE optional; offsets 0–15)</span>
         </div>
         <textarea id="grassDataIn" spellcheck="false" placeholder="e.g.
 123 64 -20  7 7 7
@@ -175,7 +173,7 @@
             <button id="crackCoords" type="button">Crack coordinates</button>
             <span id="crackStatus" class="hint">Uses current offset data (no need to export).</span>
           </div>
-          <textarea id="crackOut" spellcheck="false" placeholder="Possible coordinates will appear here…"></textarea>
+          <textarea id="crackOut" spellcheck="false" readonly placeholder="Possible coordinates will appear here…"></textarea>
         </div>
 
       </details>
@@ -187,7 +185,7 @@
         <div class="canvas-topright">
           <div class="rp-controls" title="Load a Minecraft resource pack (zip). Textures/models inside will override the defaults.">
             <input id="resourcePackFile" type="file" accept=".zip,application/zip" />
-            <button id="resourcePackLoad" type="button">Load pack</button>
+            <button id="resourcePackLoad" type="button">Load resource pack</button>
             <button id="resourcePackUnload" type="button" class="hidden">Unload</button>
             <span id="resourcePackName" class="rp-name hidden"></span>
           </div>
