@@ -1974,9 +1974,9 @@ let bambooModelSize = '2x2'; // '2x2' | '3x3'
 
 function isBamboo(id){ return String(id || '') === 'BAMBOO'; }
 
-function showHideBambooUvControls(){
+function showHideBambooUvControls(foliageId = activeFoliageId){
   if (!el.bambooUvControls) return;
-  const show = isBamboo(activeFoliageId);
+  const show = isBamboo(foliageId);
   el.bambooUvControls.classList.toggle('hidden', !show);
   if (show && el.bambooModelSize) el.bambooModelSize.value = String(bambooModelSize || '2x2');
 }
@@ -2003,8 +2003,8 @@ function dripstoneEffToRaw(j){
   return DRIPSTONE_EFF_TO_RAW[e];
 }
 
-function updateOffsetUiMode(){
-  const isDrip = isPointedDripstone(activeFoliageId);
+function updateOffsetUiMode(foliageId = activeFoliageId){
+  const isDrip = isPointedDripstone(foliageId);
   if (el.offX) { el.offX.min = '0'; el.offX.max = isDrip ? '9' : '15'; el.offX.step = '1'; }
   if (el.offZ) { el.offZ.min = '0'; el.offZ.max = isDrip ? '9' : '15'; el.offZ.step = '1'; }
   if (el.offXRange) el.offXRange.textContent = isDrip ? '0-9' : '0-15';
@@ -2016,14 +2016,14 @@ function updateOffsetUiMode(){
 }
 
 
-function applyBambooUvToTexture(tex){
+function applyBambooUvToTexture(tex, u = bambooUvU, v = bambooUvV){
   if (!tex) return;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(1, 1);
 
   // 1px = 1/16 of a Minecraft texture
-  tex.offset.set((bambooUvU % 16) / 16, (bambooUvV % 16) / 16);
+  tex.offset.set(((u|0) % 16) / 16, ((v|0) % 16) / 16);
   tex.needsUpdate = true;
 }
 
@@ -2202,6 +2202,11 @@ function getActiveVariantFor(foliageId){
   if (!foliageSupportsHeight(foliageId)) return null;
   const v = { height: activeVariantHeight|0 };
   if (foliageId === 'POINTED_DRIPSTONE') v.dir = activeVariantDir;
+  if (foliageId === 'BAMBOO') {
+    v.uvU = bambooUvU|0;
+    v.uvV = bambooUvV|0;
+    v.modelSize = String(bambooModelSize || '2x2');
+  }
   return v;
 }
 
@@ -2239,6 +2244,7 @@ function setPlacementFoliage(id){
   syncPropaguleControls();
   syncCubeControls();
   syncSeagrassFrameControls();
+  updateOffsetUiMode(activeFoliageId);
 // If we are in placement mode, rebuild preview immediately.
   if (typeof placementMode !== 'undefined' && placementMode) {
     ensurePlacementOffsetRules();
@@ -2271,36 +2277,82 @@ el.seagrassFrameNext?.addEventListener('click', () => {
 });
 
 el.bambooUvU?.addEventListener('input', () => {
-  bambooUvU = clampInt(el.bambooUvU.value, 0, 15);
+  const nextU = clampInt(el.bambooUvU.value, 0, 15);
+
+  // If a bamboo instance is selected, edit that instance only.
+  try {
+    if (selectedId != null) {
+      const g = grasses.get(selectedId);
+      if (g && g.kind === 'BAMBOO') {
+        if (!g.variant) g.variant = {};
+        g.variant.uvU = nextU;
+        const mat = ensureBambooInstanceMat(g);
+        const u = clampInt(g.variant.uvU ?? nextU, 0, 15);
+        const v = clampInt(g.variant.uvV ?? bambooUvV, 0, 15);
+        if (mat && mat.map) applyBambooUvToTexture(mat.map, u, v);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // Otherwise treat as placement default.
+  bambooUvU = nextU;
   applyBambooUvToCachedMats();
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
 });
 
 el.bambooUvV?.addEventListener('input', () => {
-  bambooUvV = clampInt(el.bambooUvV.value, 0, 15);
+  const nextV = clampInt(el.bambooUvV.value, 0, 15);
+
+  // If a bamboo instance is selected, edit that instance only.
+  try {
+    if (selectedId != null) {
+      const g = grasses.get(selectedId);
+      if (g && g.kind === 'BAMBOO') {
+        if (!g.variant) g.variant = {};
+        g.variant.uvV = nextV;
+        const mat = ensureBambooInstanceMat(g);
+        const u = clampInt(g.variant.uvU ?? bambooUvU, 0, 15);
+        const v = clampInt(g.variant.uvV ?? nextV, 0, 15);
+        if (mat && mat.map) applyBambooUvToTexture(mat.map, u, v);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // Otherwise treat as placement default.
+  bambooUvV = nextV;
   applyBambooUvToCachedMats();
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
 });
 
 el.bambooModelSize?.addEventListener('change', () => {
-  bambooModelSize = String(el.bambooModelSize.value || '2x2');
+  const nextSize = String(el.bambooModelSize.value || '2x2');
+
+  // If a bamboo instance is selected, edit that instance only.
+  try {
+    if (selectedId != null) {
+      const g = grasses.get(selectedId);
+      if (g && g.kind === 'BAMBOO') {
+        if (!g.variant) g.variant = {};
+        g.variant.modelSize = nextSize;
+        rebuildBambooInstance(g);
+        refreshGrassList();
+        setSelected(g.id);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // Otherwise treat as placement default (and update existing bamboo like before).
+  bambooModelSize = nextSize;
+
   // Rebuild any placed bamboo meshes so the change is visible immediately.
   try {
     for (const g of grasses.values()) {
       if (g.kind !== 'BAMBOO') continue;
-      const mats = ensureFoliageMats('BAMBOO');
-      const isSel = (g.id === selectedId);
-      const mat = isSel ? mats.selected : mats.base;
-
-      const newMesh = makeBambooMesh(mat, g.variant?.height ?? 1);
-      newMesh.userData.__grassId = g.id;
-
-      grassGroup.remove(g.mesh);
-      grassGroup.add(newMesh);
-      g.mesh = newMesh;
-      updateGrassMeshTransform(g);
+      rebuildBambooInstance(g);
     }
-    // Re-apply selection materials/tint to keep state consistent.
     setSelected(selectedId);
   } catch (_) {
     // no-op
@@ -2395,20 +2447,55 @@ el.cubeBlockType?.addEventListener('change', () => {
 
 
 
-el.variantHeight?.addEventListener('input', () => {
-  activeVariantHeight = Math.max(1, Math.min(16, Math.trunc(num(el.variantHeight.value, activeVariantHeight))));
+function applyVariantHeightFromUI(){
+  const nextH = Math.max(1, Math.min(16, Math.trunc(num(el.variantHeight?.value, activeVariantHeight))));
+
+  // If a height-capable instance is selected, edit that instance only.
+  try {
+    if (selectedId != null) {
+      const g = grasses.get(selectedId);
+      if (g && foliageSupportsHeight(g.kind)) {
+        if (!g.variant) g.variant = {};
+        g.variant.height = nextH;
+        if (g.kind === 'BAMBOO') rebuildBambooInstance(g);
+        if (g.kind === 'POINTED_DRIPSTONE') rebuildDripstoneInstance(g);
+        refreshGrassList();
+        setSelected(g.id);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // Otherwise treat as placement default.
+  activeVariantHeight = nextH;
   if (typeof placementMode !== 'undefined' && placementMode) {
     ensurePlacementPreview();
   }
-});
-el.variantHeight?.addEventListener('change', () => {
-  activeVariantHeight = Math.max(1, Math.min(16, Math.trunc(num(el.variantHeight.value, activeVariantHeight))));
-  if (typeof placementMode !== 'undefined' && placementMode) {
-    ensurePlacementPreview();
-  }
-});
+}
+
+el.variantHeight?.addEventListener('input', applyVariantHeightFromUI);
+el.variantHeight?.addEventListener('change', applyVariantHeightFromUI);
+
 el.variantDir?.addEventListener('change', () => {
-  activeVariantDir = String(el.variantDir.value || 'up');
+  const nextDir = (String(el.variantDir.value) === 'down') ? 'down' : 'up';
+
+  // If a dripstone instance is selected, edit that instance only.
+  try {
+    if (selectedId != null) {
+      const g = grasses.get(selectedId);
+      if (g && g.kind === 'POINTED_DRIPSTONE') {
+        if (!g.variant) g.variant = {};
+        g.variant.dir = nextDir;
+        rebuildDripstoneInstance(g);
+        refreshGrassList();
+        setSelected(g.id);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // Otherwise treat as placement default.
+  activeVariantDir = nextDir;
   if (typeof placementMode !== 'undefined' && placementMode) {
     ensurePlacementPreview();
   }
@@ -3077,7 +3164,7 @@ function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
   const variant = getActiveVariantFor(foliageId);
 
   if (foliageId === 'BAMBOO') {
-    return makeBambooMesh(mats.placement, variant?.height ?? 1);
+    return makeBambooMesh(mats.placement, variant?.height ?? 1, { modelSize: variant?.modelSize });
   }
   if (foliageId === 'POINTED_DRIPSTONE') {
     // In placement mode we want a visible preview even while textures are still streaming.
@@ -3227,8 +3314,9 @@ function getLocalBamboo3x3ModelJSON(){
   return bamboo3x3ModelJsonPromise;
 }
 
-function makeBambooMesh(mat, height=1){
-  return (String(bambooModelSize) === '3x3')
+function makeBambooMesh(mat, height=1, opts = {}){
+  const ms = String((opts && opts.modelSize) || bambooModelSize || '2x2');
+  return (ms === '3x3')
     ? makeBamboo3x3StackMesh(mat, height)
     : makeBambooStackMesh(mat, height);
 }
@@ -3468,6 +3556,66 @@ function updateGrassMeshTransform(g){
   g.mesh.position.copy(blockOrigin.add(offset));
 }
 
+// --- Rebuild helpers (selected-instance variant editing) ---
+function ensureBambooInstanceMat(g){
+  if (!g) return null;
+  if (g.__bambooMat && g.__bambooMat.isMaterial) return g.__bambooMat;
+  const mats = ensureFoliageMats('BAMBOO');
+  const src = mats.base;
+  const m = src.clone();
+  if (src.map) m.map = src.map.clone();
+  g.__bambooMat = m;
+  return m;
+}
+
+function rebuildBambooInstance(g){
+  if (!g || g.kind !== 'BAMBOO') return;
+  const h = clampInt(g.variant?.height ?? 1, 1, 16);
+  const ms = String(g.variant?.modelSize || bambooModelSize || '2x2');
+  const u = clampInt(g.variant?.uvU ?? bambooUvU, 0, 15);
+  const v = clampInt(g.variant?.uvV ?? bambooUvV, 0, 15);
+
+  const mat = ensureBambooInstanceMat(g);
+  if (mat && mat.map) applyBambooUvToTexture(mat.map, u, v);
+
+  const old = g.mesh;
+  const newMesh = makeBambooMesh(mat, h, { modelSize: ms });
+  newMesh.userData.__grassId = g.id;
+
+  grassGroup.remove(old);
+  grassGroup.add(newMesh);
+  g.mesh = newMesh;
+
+  // Best-effort dispose old geometry to limit GPU leaks.
+  try {
+    old?.traverse?.(obj => { if (obj.isMesh && obj.geometry) obj.geometry.dispose?.(); });
+  } catch (_) {}
+
+  updateGrassMeshTransform(g);
+}
+
+function rebuildDripstoneInstance(g){
+  if (!g || g.kind !== 'POINTED_DRIPSTONE') return;
+  const mats = ensureFoliageMats('POINTED_DRIPSTONE');
+  const h = clampInt(g.variant?.height ?? 1, 1, 16);
+  const dir = (String(g.variant?.dir) === 'down') ? 'down' : 'up';
+
+  const old = g.mesh;
+  const newMesh = makeDripstoneStackMesh(mats.base, h, dir);
+  newMesh.userData.__grassId = g.id;
+
+  grassGroup.remove(old);
+  grassGroup.add(newMesh);
+  g.mesh = newMesh;
+
+  try {
+    old?.traverse?.(obj => { if (obj.isMesh && obj.geometry) obj.geometry.dispose?.(); });
+  } catch (_) {}
+
+  updateGrassMeshTransform(g);
+}
+
+
 function setSelected(id){
   selectedId = id;
   for (const g of grasses.values()) {
@@ -3478,7 +3626,7 @@ function setSelected(id){
     // - Sunflower top uses the sunflower_top block model with multiple textures.
     // - Pointed dripstone stacks have one material per segment (base/middle/frustum/tip).
     // For these, just tint the existing materials to indicate selection.
-    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE') {
+    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE' || g.kind === 'BAMBOO') {
       const tintHex = isSel ? 0xdb8484 : 0xdddddd;
       g.mesh.traverse(obj => {
         if (!obj.isMesh) return;
@@ -3547,9 +3695,59 @@ function setSelected(id){
   }
 
 	// sync UI
-  if (id == null) return;
+  if (id == null) {
+    // No selection: show placement-mode controls.
+    syncVariantControls();
+    syncPropaguleControls();
+    syncCubeControls();
+    syncSeagrassFrameControls();
+    syncBambooUvUI();
+    updateOffsetUiMode(activeFoliageId);
+    return;
+  }
 	const g = grasses.get(id);
-	if (!g) return;
+	if (!g) {
+    syncVariantControls();
+    syncPropaguleControls();
+    syncCubeControls();
+    syncSeagrassFrameControls();
+    syncBambooUvUI();
+    updateOffsetUiMode(activeFoliageId);
+    return;
+  }
+
+  // If a selectable instance supports height/direction, edit *that instance* (not the placement defaults).
+  if (foliageSupportsHeight(g.kind)) {
+    if (el.variantControls) el.variantControls.classList.remove('hidden');
+    if (el.variantHeight) el.variantHeight.value = String(clampInt(g.variant?.height ?? 1, 1, 16));
+
+    const showDir = foliageSupportsDir(g.kind);
+    const dEl = el.variantDir;
+    const dLabel = el.dirLabel ?? dEl?.parentElement;
+    if (dLabel) {
+      dLabel.classList.toggle('hidden', !showDir);
+      dLabel.style.display = showDir ? '' : 'none';
+    }
+    if (dEl) dEl.value = String(g.variant?.dir ?? 'up');
+  } else {
+    syncVariantControls();
+  }
+
+  // Bamboo UV + model size can be edited per selected bamboo instance.
+  if (g.kind === 'BAMBOO') {
+    showHideBambooUvControls('BAMBOO');
+    if (el.bambooUvU) el.bambooUvU.value = String(clampInt(g.variant?.uvU ?? bambooUvU, 0, 15));
+    if (el.bambooUvV) el.bambooUvV.value = String(clampInt(g.variant?.uvV ?? bambooUvV, 0, 15));
+    if (el.bambooModelSize) el.bambooModelSize.value = String(g.variant?.modelSize || bambooModelSize || '2x2');
+  } else {
+    // Placement-mode visibility/value.
+    showHideBambooUvControls();
+    if (isBamboo(activeFoliageId)) {
+      if (el.bambooUvU) el.bambooUvU.value = String(bambooUvU);
+      if (el.bambooUvV) el.bambooUvV.value = String(bambooUvV);
+      if (el.bambooModelSize) el.bambooModelSize.value = String(bambooModelSize || '2x2');
+    }
+  }
 
 	// Mangrove propagule: show the variant dropdown while selected, and mirror its current variant.
 	if (g.kind === 'MANGROVE_PROPAGULE') {
@@ -3597,7 +3795,7 @@ function setSelected(id){
   el.offZ.value = String(isPointedDripstone(g.kind) ? dripstoneRawToEff(g.off.z) : g.off.z);
 
   // Tall grass
-  updateOffsetUiMode();
+  updateOffsetUiMode(g.kind);
 
   // Tall grass never uses Y offset. Disable the Y box in the GUI while it's selected.
   if (el.offY) {
@@ -3642,8 +3840,16 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
 
   let mesh;
   const variant = getActiveVariantFor(kind);
+  let __bambooMat = null;
   if (kind === 'BAMBOO') {
-    mesh = makeBambooMesh(mats.base, variant?.height ?? 1);
+    // Per-instance bamboo material so UV/model tweaks can affect only the selected bamboo.
+    const src = mats.base;
+    __bambooMat = src.clone();
+    if (src.map) {
+      __bambooMat.map = src.map.clone();
+      applyBambooUvToTexture(__bambooMat.map, variant?.uvU ?? bambooUvU, variant?.uvV ?? bambooUvV);
+    }
+    mesh = makeBambooMesh(__bambooMat, variant?.height ?? 1, { modelSize: variant?.modelSize });
   } else if (kind === 'POINTED_DRIPSTONE') {
     mesh = makeDripstoneStackMesh(mats.base, variant?.height ?? 1, variant?.dir ?? 'up');
   } else if (kind === 'CUBE') {
@@ -3668,7 +3874,8 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   mesh.userData.__grassId = id;
   grassGroup.add(mesh);
 
-  const g = { id, kind, block: block.clone(), off: { ...fixedOff }, mesh, variant: getActiveVariantFor(kind) };
+  const g = { id, kind, block: block.clone(), off: { ...fixedOff }, mesh, variant };
+  if (kind === 'BAMBOO' && __bambooMat) g.__bambooMat = __bambooMat;
   if (kind === 'MANGROVE_PROPAGULE') g.propaguleModel = String(activePropaguleModel || 'ground');
   if (kind === 'CUBE') g.cubeType = String(activeCubeBlockType || 'GRASS_BLOCK');
   grasses.set(id, g);
