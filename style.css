@@ -89,6 +89,24 @@ details[open] summary{
   padding: 10px 12px;
 }
 
+/* Used to visually disable a control row (e.g. tolerance slider in strict mode). */
+.row.is-disabled{
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.row.is-disabled input[type="range"]{
+  filter: grayscale(1);
+}
+
+input[type="range"]:disabled{
+  opacity: 0.75;
+}
+
+input[type="range"]:disabled{
+  cursor: not-allowed;
+}
+
 .row.fov-nudge{
   padding-top: 0;
 }

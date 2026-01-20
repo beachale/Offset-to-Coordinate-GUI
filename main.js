@@ -598,6 +598,7 @@ const el = {
   bambooModelSize: document.getElementById('bambooModelSize'),
   variantControls: document.getElementById('variantControls'),
   variantHeight: document.getElementById('variantHeight'),
+  dirLabel: document.getElementById('dirLabel'),
   variantDir: document.getElementById('variantDir'),
   propaguleControls: document.getElementById('propaguleControls'),
   propaguleModel: document.getElementById('propaguleModel'),
@@ -638,14 +639,26 @@ const matchModeEl = el.matchMode;
 const toleranceEl = el.tolerance;
 const tolValEl = el.tolVal;
 const warnEl = el.warn;
+const toleranceRowEl = (toleranceEl && toleranceEl.closest) ? toleranceEl.closest('label.row') : null;
+
+function updateCrackerModeUI() {
+  const isStrict = (matchModeEl?.value === 'strict');
+
+  // Strict mode ignores tolerance, so disable the slider to avoid confusion.
+  if (toleranceEl) toleranceEl.disabled = isStrict;
+  if (toleranceRowEl) toleranceRowEl.classList.toggle('is-disabled', isStrict);
+
+  // Scored-mode warning.
+  if (warnEl) warnEl.classList.toggle('hidden', isStrict);
+}
 
 if (toleranceEl && tolValEl) {
   tolValEl.textContent = String(toleranceEl.value);
   toleranceEl.oninput = () => { tolValEl.textContent = String(toleranceEl.value); };
 }
-if (matchModeEl && warnEl) {
-  warnEl.classList.toggle('hidden', matchModeEl.value === 'strict');
-  matchModeEl.onchange = () => warnEl.classList.toggle('hidden', matchModeEl.value === 'strict');
+if (matchModeEl) {
+  updateCrackerModeUI();
+  matchModeEl.onchange = updateCrackerModeUI;
 }
 
 function applyViewportSize(w, h) {
@@ -2109,7 +2122,16 @@ function syncVariantControls(){
   // Direction (dripstone only)
   const dEl = el.variantDir;
   if (dEl) {
-    dEl.parentElement?.classList?.toggle('hidden', !foliageSupportsDir(activeFoliageId));
+    // Keep the UI clean: Direction is only meaningful for pointed dripstone.
+    // Hide it by default in the HTML, and only reveal it when applicable.
+    const dLabel = el.dirLabel ?? dEl.parentElement;
+    const showDir = foliageSupportsDir(activeFoliageId);
+    // Use both a class toggle AND an inline style to avoid any CSS specificity issues.
+    // (Inline style also helps if the user is running an older cached stylesheet.)
+    if (dLabel) {
+      dLabel.classList.toggle('hidden', !showDir);
+      dLabel.style.display = showDir ? '' : 'none';
+    }
     dEl.value = activeVariantDir;
   }
 }
@@ -2228,6 +2250,9 @@ function setPlacementFoliage(id){
 }
 
 populateFoliageSelect();
+
+// Ensure the correct initial visibility for height/direction controls.
+syncVariantControls();
 
 
 showHideBambooUvControls();
@@ -3349,7 +3374,15 @@ function makeDripstoneStackMesh(baseMat, height=1, dir='up', opts = {}){
     mat.needsUpdate = true;
 
     const seg = makeGrassMesh(mat); // crossed planes (same geometry as foliage)
-    seg.position.set(0, i, 0);
+    // Stack direction:
+    //  - 'up' grows toward +Y (base at y=0, tip at y=h-1)
+    //  - 'down' should grow toward -Y (the TOP segment should sit at y=0)
+    //
+    // Note: segListDown() returns textures in *bottom-to-top* order (tip .. base).
+    // To make a hanging dripstone grow downward from its anchor block, we flip the
+    // Y placement so the last segment (base/frustum) ends up at y=0.
+    const y = (d === 'down') ? (i - (texNames.length - 1)) : i;
+    seg.position.set(0, y, 0);
     root.add(seg);
 
     (async () => {

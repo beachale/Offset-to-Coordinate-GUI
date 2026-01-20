@@ -215,7 +215,8 @@
           <label id="heightLabel">Height
             <input id="variantHeight" type="number" min="1" max="16" step="1" value="1"/>
           </label>
-          <label id="dirLabel">Direction
+          <!-- Direction is only meaningful for pointed dripstone. Hide it by default. -->
+          <label id="dirLabel" class="hidden" style="display:none;">Direction
             <select id="variantDir">
               <option value="up">up</option>
               <option value="down">down</option>
