@@ -185,7 +185,7 @@ const TINTED_CROSS_MODEL = {"ambientocclusion":false,"textures":{"particle":"#cr
 const blockModelCache = new Map();
 
 // --- Viewport vs workspace ---
-// The on-page viewport is a fixed 960Ã—540 canvas.
+// The on-page viewport is a fixed 960x540 canvas.
 // Inside that viewport, we display a (potentially huge) workspace coordinate space.
 // You can pan/zoom the workspace, and independently choose the render resolution
 // of the Three.js scene inside that workspace.
@@ -1064,7 +1064,7 @@ applyWorkspaceAndRenderSize(VIEW_W, VIEW_H, RENDER_W, RENDER_H);
 syncOverlayUI();
 syncGrassOpacityUI();
 
-// --- Pan/zoom inside the fixed 960Ã—540 viewport canvas ---
+// --- Pan/zoom inside the fixed 960x540 viewport canvas ---
 let leftDown = false;
 let leftDownClientX = 0;
 let leftDownClientY = 0;
@@ -1174,18 +1174,18 @@ function updateCameraFromUI(){
 `Minecraft-style camera
 pos   = (${x.toFixed(3)}, ${yEye.toFixed(3)}, ${z.toFixed(3)})   [eye]
 feet  = (${x.toFixed(3)}, ${yFeet.toFixed(3)}, ${z.toFixed(3)})
-yaw   = ${yaw.toFixed(3)}Â°   (0=+Z/south, -90=+X/east)
-pitch = ${pitch.toFixed(3)}Â° (+=down, -=up)
-fov   = ${fov.toFixed(3)}Â°   (vertical)
+yaw   = ${yaw.toFixed(3)} deg   (0=+Z/south, -90=+X/east)
+pitch = ${pitch.toFixed(3)} deg (+=down, -=up)
+fov   = ${fov.toFixed(3)} deg   (vertical)
 old nudge = ${useOldNudge ? '+0.05' : 'off'}
 really old nudge = ${useReallyOldNudge ? '-0.10' : 'off'}`;
   } else {
     el.readout.textContent =
 `Minecraft-style camera
 pos   = (${x.toFixed(3)}, ${yEye.toFixed(3)}, ${z.toFixed(3)})   [blocks]
-yaw   = ${yaw.toFixed(3)}Â°   (0=+Z/south, -90=+X/east)
-pitch = ${pitch.toFixed(3)}Â° (+=down, -=up)
-fov   = ${fov.toFixed(3)}Â°   (vertical)
+yaw   = ${yaw.toFixed(3)} deg   (0=+Z/south, -90=+X/east)
+pitch = ${pitch.toFixed(3)} deg (+=down, -=up)
+fov   = ${fov.toFixed(3)} deg   (vertical)
 old nudge = ${useOldNudge ? '+0.05' : 'off'}
 really old nudge = ${useReallyOldNudge ? '-0.10' : 'off'}`;
   }
@@ -1271,7 +1271,7 @@ el.showGrass.addEventListener('change', syncGrassUI);
 syncGrassUI();
 
 // Shared materials/geometry
-// Two textures (same model + same 0â€“15 offsets). Switch with keyboard:
+// Two textures (same model + same 0-15 offsets). Switch with keyboard:
 //   1 = Jappa (modern)
 //   2 = Programmer Art
 const texIndicatorEl = document.getElementById('texIndicator');
@@ -1987,8 +1987,8 @@ function clampInt(v, a, b){
   return Math.max(a, Math.min(b, n));
 }
 
-/** Pointed dripstone: vanilla uses the default 16-step foliage grid (±0.25) and then clamps to ±0.125.
-    This collapses indices 0–3 and 12–15 into identical final positions.
+/** Pointed dripstone: vanilla uses the default 16-step foliage grid (+/-0.25) and then clamps to +/-0.125.
+    This collapses indices 0-3 and 12-15 into identical final positions.
     We expose a 10-step *effective* selector (0..9) to avoid fake precision. */
 const DRIPSTONE_EFF_TO_RAW = [0,4,5,6,7,8,9,10,11,15]; // representatives
 function isPointedDripstone(id){ return String(id || '') === 'POINTED_DRIPSTONE'; }
@@ -2007,10 +2007,10 @@ function updateOffsetUiMode(){
   const isDrip = isPointedDripstone(activeFoliageId);
   if (el.offX) { el.offX.min = '0'; el.offX.max = isDrip ? '9' : '15'; el.offX.step = '1'; }
   if (el.offZ) { el.offZ.min = '0'; el.offZ.max = isDrip ? '9' : '15'; el.offZ.step = '1'; }
-  if (el.offXRange) el.offXRange.textContent = isDrip ? '0–9' : '0–15';
-  if (el.offZRange) el.offZRange.textContent = isDrip ? '0–9' : '0–15';
+  if (el.offXRange) el.offXRange.textContent = isDrip ? '0-9' : '0-15';
+  if (el.offZRange) el.offZRange.textContent = isDrip ? '0-9' : '0-15';
 
-  // Heads-up: pointed dripstone edge offsets collapse (0–3 and 12–15 map to the same final offset).
+  // Heads-up: pointed dripstone edge offsets collapse (0-3 and 12-15 map to the same final offset).
   const showNote = isDrip;
   if (el.dripstoneOffsetNote) el.dripstoneOffsetNote.classList.toggle('hidden', !showNote);
 }
@@ -2682,8 +2682,8 @@ syncGrassTextureIndicator();
 
 // We build the grass directly from the Minecraft model JSON (tinted_cross.json)
 // so that rotations (including `rescale: true`) match the in-game geometry.
-const RESCALE_22_5 = 1 / Math.cos(0.39269908169872414) - 1; // 22.5Â°
-const RESCALE_45   = 1 / Math.cos(Math.PI / 4) - 1;         // 45Â°
+const RESCALE_22_5 = 1 / Math.cos(0.39269908169872414) - 1; // 22.5 deg
+const RESCALE_45   = 1 / Math.cos(Math.PI / 4) - 1;         // 45 deg
 
 /**
  * Compute the per-axis rescale factor used by Minecraft's FaceBakery when
@@ -2720,7 +2720,7 @@ function rotateUvQuad(quad, rotDeg){
   // quad is [[u,v], [u,v], [u,v], [u,v]] in PlaneGeometry vertex order: TL, TR, BL, BR
   const r = ((Number(rotDeg) || 0) % 360 + 360) % 360;
   if (r === 0) return quad;
-  // Minecraft rotates face UVs clockwise in 90° steps.
+  // Minecraft rotates face UVs clockwise in 90 deg steps.
   if (r === 90)  return [quad[2], quad[0], quad[3], quad[1]]; // clockwise
   if (r === 180) return [quad[3], quad[2], quad[1], quad[0]];
   if (r === 270) return [quad[1], quad[3], quad[0], quad[2]];
@@ -2993,7 +2993,7 @@ function makeGrassMesh(mat){
       plane.position.set(cx, cy, cz);
       planeKind = 'yz';
     } else if (sy < eps) {
-      // XZ plane (constant Y) â€” not used by tinted_cross but supported
+      // XZ plane (constant Y) - not used by tinted_cross but supported
       plane = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), mtl);
       plane.rotation.x = -Math.PI / 2;
       plane.position.set(cx, cy, cz);
@@ -3220,7 +3220,7 @@ function makeBambooStackMesh(mat, height=1){
   return tagAsFoliagePart(root);
 }
 
-// --- Bamboo model size support (2×2 procedural or 3×3 via local JSON model) ---
+// --- Bamboo model size support (2x2 procedural or 3x3 via local JSON model) ---
 const LOCAL_BAMBOO_3X3_MODEL = {"textures":{"all":"block/bamboo_stalk","particle":"block/bamboo_stalk"},"elements":[{"from":[7,0,7],"to":[9,16,9],"faces":{"down":{"uv":[13,4,15,6],"texture":"#all","cullface":"down"},"up":{"uv":[13,0,15,2],"texture":"#all","cullface":"up"},"north":{"uv":[0,0,2,16],"texture":"#all"},"south":{"uv":[0,0,2,16],"texture":"#all"},"west":{"uv":[0,0,2,16],"texture":"#all"},"east":{"uv":[0,0,2,16],"texture":"#all"}}}]};
 let bamboo3x3ModelJsonPromise = Promise.resolve(LOCAL_BAMBOO_3X3_MODEL);
 function getLocalBamboo3x3ModelJSON(){
@@ -3233,7 +3233,7 @@ function makeBambooMesh(mat, height=1){
     : makeBambooStackMesh(mat, height);
 }
 
-// When we scale the vanilla 2×2 bamboo JSON element up to a 3×3 stalk, we must also widen the
+// When we scale the vanilla 2x2 bamboo JSON element up to a 3x3 stalk, we must also widen the
 // UV rectangles so we sample a 3px-wide strip (instead of stretching a 2px strip across 3px).
 function adjustBamboo3x3ModelUVs(model){
   if (!model || !Array.isArray(model.elements)) return model;
@@ -3265,7 +3265,7 @@ function adjustBamboo3x3ModelUVs(model){
       if (faces[k]?.uv) widenUv(faces[k].uv, 3, null);
     }
 
-    // Caps: widen + heighten to 3×3 if they're the 2×2 vanilla cap UVs.
+    // Caps: widen + heighten to 3x3 if they're the 2x2 vanilla cap UVs.
     for (const k of ['up','down']) {
       if (faces[k]?.uv) widenUv(faces[k].uv, 3, 3);
     }
@@ -3293,7 +3293,7 @@ function makeBamboo3x3StackMesh(mat, height=1){
     // Build one segment from the provided JSON model, then clone it for each height level.
     const seg = buildMinecraftModelGroup(uvFixedModel, mat);
 
-    // Scale only XZ to turn the 2×2 post into a 3×3 post, keeping it centered in the block.
+    // Scale only XZ to turn the 2x2 post into a 3x3 post, keeping it centered in the block.
     const pivot = new THREE.Group();
     pivot.position.set(0.5, 0, 0.5);
     seg.position.set(-0.5, 0, -0.5);
@@ -3316,7 +3316,7 @@ function makeBamboo3x3StackMesh(mat, height=1){
 
 
 // Pointed dripstone: use the vanilla model approach (two crossed planes) with the correct per-segment textures.
-// Vanilla assets define a shared "pointed_dripstone" parent model (crossed planes rotated 45°), and variants
+// Vanilla assets define a shared "pointed_dripstone" parent model (crossed planes rotated 45 deg), and variants
 // are just different textures (up_tip, up_frustum, up_middle, up_base, and the down_* equivalents).
 //
 // Height selector:
@@ -3407,7 +3407,7 @@ let activeBlock = new THREE.Vector3(0, 0, 0);
 
 function keyForBlock(b){ return `${b.x}|${b.y}|${b.z}`; }
 
-/** Block occupancy map: at most one placed texture per 1×1×1 block cell. */
+/** Block occupancy map: at most one placed texture per 1x1x1 block cell. */
 /** @type {Map<string, number>} */
 const occupiedByBlock = new Map();
 
@@ -3685,7 +3685,7 @@ function removeGrass(id){
   const g = grasses.get(id);
   if (!g) return;
 
-  // Release the 1×1×1 block occupancy so something else can be placed here.
+  // Release the 1x1x1 block occupancy so something else can be placed here.
   // Guard against rare state mismatches (e.g., if something overwrote the map).
   const k = keyForBlock(g.block);
   if (occupiedByBlock.get(k) === id) {
@@ -3957,7 +3957,7 @@ el.crackCoords.addEventListener('click', async () => {
 
   el.crackOut.value = '';
   el.crackCoords.disabled = true;
-  el.crackStatus.textContent = 'Crackingâ€¦ (this can take a while for large radii)';
+  el.crackStatus.textContent = 'Cracking... (this can take a while for large radii)';
 
   const t0 = performance.now();
   try{
@@ -3970,7 +3970,7 @@ el.crackCoords.addEventListener('click', async () => {
       useWorkers: !!el.crackWorkers?.checked,
       onProgress: ({done, total, matches}) => {
         const pct = total ? (done/total*100) : 0;
-        el.crackStatus.textContent = `Crackingâ€¦ ${pct.toFixed(1)}%  checked ${done.toLocaleString()} / ${total.toLocaleString()}  matches ${matches}`;
+        el.crackStatus.textContent = `Cracking... ${pct.toFixed(1)}%  checked ${done.toLocaleString()} / ${total.toLocaleString()}  matches ${matches}`;
       }
     });
 
@@ -3981,16 +3981,16 @@ el.crackCoords.addEventListener('click', async () => {
     });
 
     if (res.warning) {
-      el.crackOut.value = `âš  ${res.warning}\n\n` + (lines.join('\n') || '(no matches)');
+      el.crackOut.value = `WARNING: ${res.warning}\n\n` + (lines.join('\n') || '(no matches)');
     } else {
       el.crackOut.value = lines.length ? lines.join('\n') : '(no matches in the searched range)';
     }
-    el.crackStatus.textContent = `Done in ${(dt/1000).toFixed(2)}s â€” matches: ${res.matches.length}`;
+    el.crackStatus.textContent = `Done in ${(dt/1000).toFixed(2)}s - matches: ${res.matches.length}`;
     el.crackOut.focus();
     el.crackOut.select();
   } catch (err){
     console.error(err);
-    el.crackStatus.textContent = 'Error while cracking â€” see console.';
+    el.crackStatus.textContent = 'Error while cracking - see console.';
     el.crackOut.value = String(err?.message || err);
   } finally {
     el.crackCoords.disabled = false;
@@ -4330,7 +4330,7 @@ const GF = (() => {
     const hw = Math.max(1, Math.min(16, (navigator.hardwareConcurrency|0) || 1));
     const xCount = (x1 - x0 + 1);
 
-    // Old versions (b1.5â€“1.12) do far more work because Y affects offsets.
+    // Old versions (b1.5-1.12) do far more work because Y affects offsets.
     // Cap worker count to 4 to keep overhead low and match the newer-cracker style.
     const targetWorkers = (version === 'postb1_5') ? 4 : hw;
     const nWorkers = wantWorkers ? Math.max(1, Math.min(targetWorkers, hw, xCount)) : 1;
@@ -4994,10 +4994,10 @@ function syncSpecialModelOpacity(){
 // --- Render loop ---
 function animate(){
   updateCameraFromUI();
-  // Render the 3D scene to the offscreen WebGL canvas (RENDER_W×RENDER_H).
+  // Render the 3D scene to the offscreen WebGL canvas (RENDER_WxRENDER_H).
   renderer.render(scene, camera);
 
-  // Composite into the fixed 960×540 viewport canvas with pan/zoom.
+  // Composite into the fixed 960x540 viewport canvas with pan/zoom.
   const cw = viewCanvas.clientWidth || 960;
   const ch = viewCanvas.clientHeight || 540;
   if (viewCanvas.width !== cw) viewCanvas.width = cw;

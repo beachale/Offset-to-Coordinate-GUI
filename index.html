@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Texture Align GUI (Minecraft coords) — Three.js</title>
+  <title>Texture Align GUI (Minecraft coords) - Three.js</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Monda:wght@400;600;700&display=swap" rel="stylesheet">
@@ -15,7 +15,7 @@
 
       <div class="brand">
         <div class="brand__title">Texture Align</div>
-        <div class="brand__subtitle">Minecraft-style coordinates • overlay match</div>
+        <div class="brand__subtitle">Minecraft-style coordinates - overlay match</div>
       </div>
 
       <details open>
@@ -82,24 +82,24 @@
             <div><b>Right click</b>: enter placement mode</div>
             <div><b>Right click again</b>: confirm placement</div>
             <div><b>WASD / arrow keys</b>: move the selected offset X/Z (snaps to valid steps)</div>
-            <div><b>R / F</b>: adjust offset Y (0–15)</div>
+            <div><b>R / F</b>: adjust offset Y (0-15)</div>
           </div>
         </div>
 
 
 
         <div class="row">
-          <label>Offset X (<span id="offXRange">0–15</span>) <input id="offX" type="number" min="0" max="15" step="1" value="7" /></label>
-          <label>Offset Y (0–15) <input id="offY" type="number" min="0" max="15" step="1" value="7" /></label>
-          <label>Offset Z (<span id="offZRange">0–15</span>) <input id="offZ" type="number" min="0" max="15" step="1" value="7" /></label>
+          <label>Offset X (<span id="offXRange">0-15</span>) <input id="offX" type="number" min="0" max="15" step="1" value="7" /></label>
+          <label>Offset Y (0-15) <input id="offY" type="number" min="0" max="15" step="1" value="7" /></label>
+          <label>Offset Z (<span id="offZRange">0-15</span>) <input id="offZ" type="number" min="0" max="15" step="1" value="7" /></label>
           <button id="applyOffsets" type="button">Apply to selected</button>
           <button id="centerOffsets" type="button">Center (7,7,7)</button>
         </div>
 
         <div id="dripstoneOffsetNote" class="foliage-variant hidden" title="Pointed dripstone offset precision">
           <div style="font-size: 12px; opacity: 0.9; line-height: 1.3;">
-            <b>Pointed dripstone note:</b> edge offsets are <b>not uniquely recoverable</b> (vanilla collapses 0–3 and 12–15 into the same final position).
-            For best cracking accuracy, prefer dripstone that’s closer to the <b>center</b> of a block.
+            <b>Pointed dripstone note:</b> edge offsets are <b>not uniquely recoverable</b> (vanilla collapses 0-3 and 12-15 into the same final position).
+            For best cracking accuracy, prefer dripstone that's closer to the <b>center</b> of a block.
           </div>
         </div>
 
@@ -124,7 +124,7 @@
 
         <div class="row" style="margin-top:10px;">
           <label for="grassDataIn">Offset data input (strict)</label>
-          <span class="hint">Paste lines in format: <code>blockX blockY blockZ  offX offY offZ TYPE</code> (TYPE optional; offsets 0–15)</span>
+          <span class="hint">Paste lines in format: <code>blockX blockY blockZ  offX offY offZ TYPE</code> (TYPE optional; offsets 0-15)</span>
         </div>
         <textarea id="grassDataIn" spellcheck="false" placeholder="e.g.
 123 64 -20  7 7 7
@@ -133,7 +133,7 @@
           <button id="loadGrassData">Load offset data</button>
         </div>
 
-        <textarea id="exportBox" spellcheck="false" placeholder="Export will appear here…"></textarea>
+        <textarea id="exportBox" spellcheck="false" placeholder="Export will appear here..."></textarea>
 
         <div class="crack">
           <div class="row">
@@ -173,7 +173,7 @@
             <button id="crackCoords" type="button">Crack coordinates</button>
             <span id="crackStatus" class="hint">Uses current offset data (no need to export).</span>
           </div>
-          <textarea id="crackOut" spellcheck="false" readonly placeholder="Possible coordinates will appear here…"></textarea>
+          <textarea id="crackOut" spellcheck="false" readonly placeholder="Possible coordinates will appear here..."></textarea>
         </div>
 
       </details>
@@ -181,7 +181,7 @@
     </aside>
 
     <main class="workspace" aria-label="Workspace">
-      <div class="viewport" aria-label="Viewport (960×540)">
+      <div class="viewport" aria-label="Viewport (960x540)">
         <div class="canvas-topright">
           <div class="rp-controls" title="Load a Minecraft resource pack (zip). Textures/models inside will override the defaults.">
             <input id="resourcePackFile" type="file" accept=".zip,application/zip" />
@@ -206,8 +206,8 @@
           </label>
           <label>Bamboo model
             <select id="bambooModelSize">
-              <option value="2x2" selected>2×2</option>
-              <option value="3x3">3×3</option>
+              <option value="2x2" selected>2x2</option>
+              <option value="3x3">3x3</option>
             </select>
           </label>
         </div>
@@ -253,9 +253,9 @@
 
         <div id="seagrassFrameControls" class="variant-controls hidden" title="Tall seagrass animation frame">
           <span>Seagrass frame</span>
-          <button id="seagrassFramePrev" type="button" class="frame-btn" aria-label="Previous seagrass frame">◀</button>
+          <button id="seagrassFramePrev" type="button" class="frame-btn" aria-label="Previous seagrass frame"><</button>
           <span id="seagrassFrameLabel" class="frame-label">1/19</span>
-          <button id="seagrassFrameNext" type="button" class="frame-btn" aria-label="Next seagrass frame">▶</button>
+          <button id="seagrassFrameNext" type="button" class="frame-btn" aria-label="Next seagrass frame">></button>
         </div>
 
       </div>
@@ -266,7 +266,7 @@
         <div><span class="swatch sel"></span> Selected texture</div>
       </div>
       </div>
-      <div class="workspace__hint">Scroll = zoom • Hold left click + drag = pan • Right click = place mode • WASD/Arrows = move offset • DEL = delete selected</div>
+      <div class="workspace__hint">Scroll = zoom | Hold left click + drag = pan | Right click = place mode | WASD/Arrows = move offset | DEL = delete selected</div>
       <div class="workspace__help">
         <div><b>Placement:</b> right click to start, move mouse to snap X/Z, use <b>R/F</b> for Y, right click again to confirm.</div>
         <div><b>Selection:</b> left click a texture to select it (selection is tinted).</div>
