@@ -7,9 +7,10 @@ const blockCubeMatCache = new Map();
 const f = Math.fround;
 
 // --- Minecraft block textures ---
-// We load foliage textures directly from the Minecraft assets repo you linked.
-// (This keeps the zip tiny while still supporting many foliage types.)
-const MC_ASSETS_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-1/assets/minecraft/textures/block/';
+// We load foliage textures directly from the Minecraft assets repo.
+// NOTE: Some assets (e.g. small dripleaf) are missing on older snapshot branches.
+// Use a newer snapshot branch as the default upstream for block textures.
+const MC_ASSETS_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/textures/block/';
 const PROGRAMMER_ART_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/Faithful-Pack/Default-Programmer-Art/refs/heads/1.21.10/assets/minecraft/textures/block/';
 
 // Explicit whitelist of textures we swap to Programmer Art.
@@ -170,7 +171,8 @@ function blockTextureUrl(key){
   return `${MC_ASSETS_BLOCK_TEX_BASE}${encodeURIComponent(k)}.png`;
 }
 
-const MC_ASSETS_BLOCK_MODEL_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-1/assets/minecraft/models/block/';
+// Keep block model JSON in sync with the texture snapshot branch.
+const MC_ASSETS_BLOCK_MODEL_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/models/block/';
 
 // Some vanilla foliage textures are grayscale and are normally tinted by the game.
 // This tool doesn't simulate biome tinting, so we apply a fixed color overlay for
@@ -303,6 +305,13 @@ function getMaxHorizontalOffsetForKind(kind){
   return (String(kind || '') === 'POINTED_DRIPSTONE') ? 0.125 : MC_MAX_HORIZ_OFF;
 }
 
+// Vanilla (26.1 snapshot 2): Small dripleaf overrides the default max vertical offset.
+// - Default (BlockBehaviour): 0.2 blocks (negative only)
+// - SmallDripleafBlock:       0.1 blocks (negative only)
+function getMaxVerticalOffsetForKind(kind){
+  return (String(kind || '') === 'SMALL_DRIPLEAF') ? 0.1 : MC_MAX_VERT_OFF;
+}
+
 // Convert the 0..15 per-axis offset integers into Minecraft's baked-model translation.
 // Most foliage uses +/-0.25 horizontal, but pointed dripstone uses +/-0.125.
 function offsetToVec3ForKind(kind, offX, offY, offZ) {
@@ -321,8 +330,10 @@ function offsetToVec3ForKind(kind, offX, offY, offZ) {
   let z = f((iZ / 15.0) * 0.5 - 0.25);
 
   // Vertical offset is standard for OffsetType.XYZ:
-  // Java: (float)i / 15.0F * 0.2F - 0.2F  -> [-0.2, 0]
-  const y = f((iY / 15.0) * MC_MAX_VERT_OFF - MC_MAX_VERT_OFF);
+  // Java: (float)i / 15.0F * maxV - maxV  -> [-maxV, 0]
+  // (Small dripleaf uses maxV=0.1; most foliage uses 0.2.)
+  const maxV = f(getMaxVerticalOffsetForKind(kind));
+  const y = f((iY / 15.0) * maxV - maxV);
 
   // 3. Apply per-block maximum horizontal offset via clamp ("fold" for dripstone)
   x = f(clamp(x, -maxH, maxH));
@@ -582,13 +593,11 @@ const el = {
   offXRange: document.getElementById('offXRange'),
   offZRange: document.getElementById('offZRange'),
   dripstoneOffsetNote: document.getElementById('dripstoneOffsetNote'),
-  applyOffsets: document.getElementById('applyOffsets'),
   centerOffsets: document.getElementById('centerOffsets'),
 
   selBlockX: document.getElementById('selBlockX'),
   selBlockY: document.getElementById('selBlockY'),
   selBlockZ: document.getElementById('selBlockZ'),
-  applySelBlock: document.getElementById('applySelBlock'),
 
   grassList: document.getElementById('grassList'),
   foliageSelect: document.getElementById('foliageSelect'),
@@ -608,6 +617,9 @@ const el = {
   seagrassFramePrev: document.getElementById('seagrassFramePrev'),
   seagrassFrameNext: document.getElementById('seagrassFrameNext'),
   seagrassFrameLabel: document.getElementById('seagrassFrameLabel'),
+  smallDripleafRotationControls: document.getElementById('smallDripleafRotationControls'),
+  smallDripleafRotateBtn: document.getElementById('smallDripleafRotateBtn'),
+  smallDripleafRotLabel: document.getElementById('smallDripleafRotLabel'),
   exportOffsets: document.getElementById('exportOffsets'),
   exportBox: document.getElementById('exportBox'),
   grassDataIn: document.getElementById('grassDataIn'),
@@ -2054,6 +2066,9 @@ let activeVariantDir = 'up';        // 'up' or 'down' (for dripstone)
 // Default: ground.
 let activePropaguleModel = 'ground'; // 'ground' | 'hanging_0'..'hanging_4'
 
+// Small dripleaf: allow rotating the *top* model (leaf) in 90° steps.
+let smallDripleafPlacementRot = 0; // 0..3 quarter turns
+
 function foliageSupportsPropaguleModel(foliageId){
   return foliageId === 'MANGROVE_PROPAGULE';
 }
@@ -2198,7 +2213,66 @@ function syncSeagrassFrameControls(){
   if (show) updateSeagrassFrameLabel();
 }
 
+
+function clampRotSteps4(v){
+  const n = Math.trunc(num(v, 0));
+  return ((n % 4) + 4) % 4;
+}
+
+function findSmallDripleafTopPivot(root){
+  if (!root) return null;
+
+  // Fast-path: stored on root when created.
+  if (root.userData && root.userData.__smallDripleafTopPivot) return root.userData.__smallDripleafTopPivot;
+
+  // Otherwise traverse to find the pivot group.
+  let found = null;
+  root.traverse(obj => {
+    if (found) return;
+    if (obj && obj.userData && obj.userData.__smallDripleafTopPivot === true) found = obj;
+  });
+  if (found && root.userData) root.userData.__smallDripleafTopPivot = found;
+  return found;
+}
+
+function applySmallDripleafTopRotation(meshRoot, rotSteps){
+  const steps = clampRotSteps4(rotSteps);
+  const pivot = findSmallDripleafTopPivot(meshRoot);
+  if (!pivot) return;
+  pivot.rotation.y = steps * (Math.PI / 2);
+  pivot.userData.__smallDripleafRotSteps = steps;
+}
+
+function getSelectedSmallDripleaf(){
+  try {
+    if (selectedId == null) return null;
+    const g = grasses.get(selectedId);
+    if (g && g.kind === 'SMALL_DRIPLEAF') return g;
+  } catch (_) {}
+  return null;
+}
+
+function syncSmallDripleafRotationControls(){
+  const box = el.smallDripleafRotationControls;
+  if (!box) return;
+
+  const sel = getSelectedSmallDripleaf();
+  const show = !!sel || activeFoliageId === 'SMALL_DRIPLEAF';
+  box.classList.toggle('hidden', !show);
+  if (!show) return;
+
+  const steps = sel ? clampRotSteps4(sel.variant?.rot ?? 0) : clampRotSteps4(smallDripleafPlacementRot);
+  if (el.smallDripleafRotLabel) el.smallDripleafRotLabel.textContent = `${steps * 90}°`;
+
+  if (el.smallDripleafRotateBtn) {
+    el.smallDripleafRotateBtn.title = sel
+      ? 'Rotate selected small dripleaf top (90°)'
+      : 'Rotate placement small dripleaf top (90°)';
+  }
+}
+
 function getActiveVariantFor(foliageId){
+  if (foliageId === 'SMALL_DRIPLEAF') return { rot: (smallDripleafPlacementRot|0) };
   if (!foliageSupportsHeight(foliageId)) return null;
   const v = { height: activeVariantHeight|0 };
   if (foliageId === 'POINTED_DRIPSTONE') v.dir = activeVariantDir;
@@ -2244,6 +2318,7 @@ function setPlacementFoliage(id){
   syncPropaguleControls();
   syncCubeControls();
   syncSeagrassFrameControls();
+  syncSmallDripleafRotationControls();
   updateOffsetUiMode(activeFoliageId);
 // If we are in placement mode, rebuild preview immediately.
   if (typeof placementMode !== 'undefined' && placementMode) {
@@ -2265,6 +2340,7 @@ showHideBambooUvControls();
 syncBambooUvUI();
 syncCubeControls();
 syncSeagrassFrameControls();
+syncSmallDripleafRotationControls();
 
 updateOffsetUiMode();
 
@@ -2275,6 +2351,27 @@ el.seagrassFramePrev?.addEventListener('click', () => {
 el.seagrassFrameNext?.addEventListener('click', () => {
   setTallSeagrassFrame(tallSeagrassFrame + 1);
 });
+
+el.smallDripleafRotateBtn?.addEventListener('click', () => {
+  // If a small dripleaf instance is selected, rotate that instance.
+  const sel = getSelectedSmallDripleaf();
+  if (sel) {
+    if (!sel.variant) sel.variant = {};
+    sel.variant.rot = clampRotSteps4((sel.variant.rot ?? 0) + 1);
+    applySmallDripleafTopRotation(sel.mesh, sel.variant.rot);
+    refreshGrassList();
+    setSelected(sel.id);
+    return;
+  }
+
+  // Otherwise rotate the placement default / placement preview (if active).
+  smallDripleafPlacementRot = clampRotSteps4(smallDripleafPlacementRot + 1);
+  if (placementPreview && placementPreview.userData.__previewFoliageId === 'SMALL_DRIPLEAF') {
+    applySmallDripleafTopRotation(placementPreview, smallDripleafPlacementRot);
+  }
+  syncSmallDripleafRotationControls();
+});
+
 
 el.bambooUvU?.addEventListener('input', () => {
   const nextU = clampInt(el.bambooUvU.value, 0, 15);
@@ -2520,7 +2617,9 @@ function texNamesForFoliage(id){
     case 'FERN': return { single: 'fern' };
     case 'SHORT_DRY_GRASS': return { single: 'short_dry_grass' };
     case 'TALL_DRY_GRASS': return { single: 'tall_dry_grass' };
-    case 'SMALL_DRIPLEAF': return { single: 'small_dripleaf' };
+    // Small dripleaf doesn't have a single "small_dripleaf.png" texture in vanilla.
+    // Use a real texture key for the basic material template.
+    case 'SMALL_DRIPLEAF': return { single: 'small_dripleaf_top' };
 
     // XZ (double-height)
     case 'TALL_GRASS': return { bottom: 'tall_grass_bottom', top: 'tall_grass_top' };
@@ -2884,6 +2983,12 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
     if (texToMatIndex.has(texName)) return texToMatIndex.get(texName);
 
     const m = material.clone();
+    // IMPORTANT: `material` may currently be hidden (opacity=0) while its own texture streams in.
+    // If we clone that hidden material and then call hideMaterialForLoad(), we'd incorrectly
+    // record a target opacity of 0 and the per-face material would stay invisible forever.
+    // Use the source material's *intended* opacity instead.
+    const intended = intendedOpacityOf(material, 1);
+    if (Number.isFinite(intended)) m.opacity = intended;
     m.map = PLACEHOLDER_TEX;
     m.needsUpdate = true;
     hideMaterialForLoad(m);
@@ -3184,6 +3289,12 @@ function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
     return makeSunflowerDoubleMesh(mats.placementBottom, mats.placementTop);
   }
 
+  // Small dripleaf is a two-block plant with its own top/bottom block models and multiple textures.
+  // Render the vanilla models so textures like stem/side/top load correctly.
+  if (foliageId === 'SMALL_DRIPLEAF') {
+    return makeSmallDripleafDoubleMesh(mats.placement, mats.placement);
+  }
+
   // Tall seagrass uses vanilla tall_seagrass_bottom/top models (template_seagrass geometry).
   if (foliageId === 'TALL_SEAGRASS') {
     return makeTallSeagrassDoubleMesh(mats.placementBottom, mats.placementTop);
@@ -3217,6 +3328,50 @@ function makeTallSeagrassDoubleMesh(bottomMat, topMat){
 
   return root;
 }
+
+function makeSmallDripleafDoubleMesh(bottomMat, topMat){
+  // Vanilla models:
+  //  - https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/models/block/small_dripleaf_bottom.json
+  //  - https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/models/block/small_dripleaf_top.json
+  // Vanilla textures:
+  //  - small_dripleaf_stem_bottom.png, small_dripleaf_side.png, small_dripleaf_stem_top.png, small_dripleaf_top.png
+  const root = new THREE.Group();
+
+  // Bottom: crossed stem planes (single texture)
+  const bottom = makeAsyncMinecraftModelMesh('small_dripleaf_bottom', bottomMat, { perFaceMaterials: true });
+  bottom.position.set(0, 0, 0);
+  bottom.userData.__tallPart = 'bottom';
+  bottom.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'bottom'; });
+
+  // Top: leaf planes + stem, multiple textures.
+  // Wrap in a pivot group so we can rotate around the block center (vanilla "facing" style rotation).
+  const top = makeAsyncMinecraftModelMesh('small_dripleaf_top', topMat, { perFaceMaterials: true });
+  top.userData.__tallPart = 'top';
+  top.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'top'; });
+
+  const topPivot = new THREE.Group();
+  topPivot.position.set(0.5, 1.5, 0.5); // center of the *top* block cell
+  topPivot.userData.__tallPart = 'top';
+  topPivot.userData.__smallDripleafTopPivot = true;
+
+  // Place the model under the pivot so its original (0,1,0) block-corner origin is preserved.
+  top.position.set(-0.5, -0.5, -0.5);
+  topPivot.add(top);
+
+  root.add(bottom);
+  root.add(topPivot);
+
+  // Cache pivot for quick lookup.
+  root.userData.__smallDripleafTopPivot = topPivot;
+
+  // Tag meshes for raycasting.
+  root.traverse(obj => {
+    if (obj.isMesh) obj.userData.__isGrassPart = true;
+  });
+
+  return root;
+}
+
 
 
 function makeSunflowerDoubleMesh(bottomMat, topMat){
@@ -3537,6 +3692,11 @@ function grassLabel(g){
     extra += ` ${ct}`;
   }
 
+if (g.kind === 'SMALL_DRIPLEAF') {
+  const r = clampRotSteps4(g.variant?.rot ?? 0);
+  extra += ` rot${r * 90}`;
+}
+
   return `#${g.id}  ${name}${extra}  block(${b.x},${b.y},${b.z})  off(${o.x},${o.y},${o.z})`;
 }
 
@@ -3626,7 +3786,7 @@ function setSelected(id){
     // - Sunflower top uses the sunflower_top block model with multiple textures.
     // - Pointed dripstone stacks have one material per segment (base/middle/frustum/tip).
     // For these, just tint the existing materials to indicate selection.
-    if (g.kind === 'SUNFLOWER' || g.kind === 'POINTED_DRIPSTONE' || g.kind === 'BAMBOO') {
+    if (g.kind === 'SUNFLOWER' || g.kind === 'SMALL_DRIPLEAF' || g.kind === 'POINTED_DRIPSTONE' || g.kind === 'BAMBOO') {
       const tintHex = isSel ? 0xdb8484 : 0xdddddd;
       g.mesh.traverse(obj => {
         if (!obj.isMesh) return;
@@ -3701,6 +3861,7 @@ function setSelected(id){
     syncPropaguleControls();
     syncCubeControls();
     syncSeagrassFrameControls();
+    syncSmallDripleafRotationControls();
     syncBambooUvUI();
     updateOffsetUiMode(activeFoliageId);
     return;
@@ -3711,6 +3872,7 @@ function setSelected(id){
     syncPropaguleControls();
     syncCubeControls();
     syncSeagrassFrameControls();
+    syncSmallDripleafRotationControls();
     syncBambooUvUI();
     updateOffsetUiMode(activeFoliageId);
     return;
@@ -3796,6 +3958,7 @@ function setSelected(id){
 
   // Tall grass
   updateOffsetUiMode(g.kind);
+  syncSmallDripleafRotationControls();
 
   // Tall grass never uses Y offset. Disable the Y box in the GUI while it's selected.
   if (el.offY) {
@@ -3863,6 +4026,10 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   } else if (kind === 'SUNFLOWER') {
     // Sunflower top is not a second stalk cross; it uses sunflower_top.json with multiple textures.
     mesh = makeSunflowerDoubleMesh(mats.baseBottom, mats.baseTop);
+  } else if (kind === 'SMALL_DRIPLEAF') {
+    // Small dripleaf is a two-block plant with custom top/bottom block models.
+    // Render the vanilla models so all required textures load.
+    mesh = makeSmallDripleafDoubleMesh(mats.base, mats.base);
   } else if (kind === 'TALL_SEAGRASS') {
     mesh = makeTallSeagrassDoubleMesh(mats.baseBottom, mats.baseTop);
   } else {
@@ -3871,6 +4038,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
       : makeGrassMesh(mats.base);
   }
 
+  if (kind === 'SMALL_DRIPLEAF') applySmallDripleafTopRotation(mesh, variant?.rot ?? 0);
   mesh.userData.__grassId = id;
   grassGroup.add(mesh);
 
@@ -3994,17 +4162,11 @@ function applySelectedBlockFromUI({syncUI=true} = {}){
 }
 
 
-// Button (kept for parity with your old workflow)
-el.applyOffsets.addEventListener('click', () => applyOffsetsFromUI());
-
 // Live update: typing in the offset boxes or using their arrow steppers immediately moves the selected grass.
 for (const k of ['offX','offY','offZ']) {
   el[k].addEventListener('input', () => applyOffsetsFromUI({syncUI:false}));
   el[k].addEventListener('change', () => applyOffsetsFromUI({syncUI:false}));
 }
-
-// Set selected grass block from XYZ boxes (below the offsets)
-el.applySelBlock.addEventListener('click', () => applySelectedBlockFromUI());
 
 // Live update: typing in the selected block XYZ boxes immediately moves the selected grass.
 for (const k of ['selBlockX','selBlockY','selBlockZ']) {
@@ -4883,6 +5045,7 @@ function ensurePlacementPreview(){
   }
 
   placementPreview = makePlacementPreviewMesh(activeFoliageId);
+  if (activeFoliageId === 'SMALL_DRIPLEAF') applySmallDripleafTopRotation(placementPreview, smallDripleafPlacementRot);
   placementPreview.userData.__placementPreview = true;
   placementPreview.userData.__previewKey = previewKey;
   placementPreview.userData.__previewFoliageId = activeFoliageId;

@@ -92,7 +92,6 @@
           <label>Offset X (<span id="offXRange">0-15</span>) <input id="offX" type="number" min="0" max="15" step="1" value="7" /></label>
           <label>Offset Y (0-15) <input id="offY" type="number" min="0" max="15" step="1" value="7" /></label>
           <label>Offset Z (<span id="offZRange">0-15</span>) <input id="offZ" type="number" min="0" max="15" step="1" value="7" /></label>
-          <button id="applyOffsets" type="button">Apply to selected</button>
           <button id="centerOffsets" type="button">Center (7,7,7)</button>
         </div>
 
@@ -107,7 +106,6 @@
           <label>X <input id="selBlockX" type="number" step="1" value="0" /></label>
           <label>Y <input id="selBlockY" type="number" step="1" value="0" /></label>
           <label>Z <input id="selBlockZ" type="number" step="1" value="0" /></label>
-          <button id="applySelBlock" type="button">Set selected block</button>
           <span class="hint">Moves the currently selected texture to a new block (keeps its offsets).</span>
         </div>
 
@@ -257,6 +255,13 @@
           <span id="seagrassFrameLabel" class="frame-label">1/19</span>
           <button id="seagrassFrameNext" type="button" class="frame-btn" aria-label="Next seagrass frame">></button>
         </div>
+
+        <div id="smallDripleafRotationControls" class="variant-controls hidden" title="Rotate the small dripleaf top model">
+          <span>Dripleaf rotation</span>
+          <button id="smallDripleafRotateBtn" type="button" class="frame-btn" aria-label="Rotate small dripleaf top">⟳</button>
+          <span id="smallDripleafRotLabel" class="frame-label">0°</span>
+        </div>
+
 
       </div>
       <div id="texIndicator" class="tex-indicator">Grass texture: Jappa</div>
