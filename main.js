@@ -626,6 +626,15 @@ const el = {
   loadGrassData: document.getElementById('loadGrassData'),
   crackCoords: document.getElementById('crackCoords'),
   crackOut: document.getElementById('crackOut'),
+  crackMatchSelect: document.getElementById('crackMatchSelect'),
+  crackTpTarget: document.getElementById('crackTpTarget'),
+  crackTpIncludeY: document.getElementById('crackTpIncludeY'),
+  crackTpOriginY: document.getElementById('crackTpOriginY'),
+  crackMakeTp: document.getElementById('crackMakeTp'),
+  crackCopyTp: document.getElementById('crackCopyTp'),
+  crackApplyCamShift: document.getElementById('crackApplyCamShift'),
+  crackTpOut: document.getElementById('crackTpOut'),
+  crackTpMsg: document.getElementById('crackTpMsg'),
   crackCenterX: document.getElementById('crackCenterX'),
   crackCenterZ: document.getElementById('crackCenterZ'),
   crackRadius: document.getElementById('crackRadius'),
@@ -3719,11 +3728,31 @@ function updateGrassMeshTransform(g){
 // --- Rebuild helpers (selected-instance variant editing) ---
 function ensureBambooInstanceMat(g){
   if (!g) return null;
-  if (g.__bambooMat && g.__bambooMat.isMaterial) return g.__bambooMat;
+  // IMPORTANT: bamboo instances may use a per-instance, UV-shifted texture clone.
+  // Also, our global "hide while loading" logic can temporarily set base opacity=0.
+  // Always normalize the instance material's opacity from the *intended* base opacity
+  // so it stays in sync with the texture opacity slider.
+  if (g.__bambooMat && g.__bambooMat.isMaterial) {
+    try {
+      const src = ensureFoliageMats('BAMBOO')?.base;
+      if (src) {
+        const op = intendedOpacityOf(src, grassOpacity);
+        g.__bambooMat.opacity = op;
+        g.__bambooMat.transparent = (op < 1) || g.__bambooMat.transparent;
+      }
+    } catch (_) {}
+    return g.__bambooMat;
+  }
   const mats = ensureFoliageMats('BAMBOO');
   const src = mats.base;
   const m = src.clone();
   if (src.map) m.map = src.map.clone();
+  // Normalize opacity (see note above).
+  try {
+    const op = intendedOpacityOf(src, grassOpacity);
+    m.opacity = op;
+    m.transparent = (op < 1) || m.transparent;
+  } catch (_) {}
   g.__bambooMat = m;
   return m;
 }
@@ -4343,6 +4372,16 @@ el.crackCoords.addEventListener('click', async () => {
       }
     });
 
+    // Expose matches for the experimental teleport helper UI.
+    try {
+      __lastCrackMatches = Array.isArray(res?.matches) ? res.matches : [];
+      __lastCrackMatchMode = matchMode;
+      __lastCrackVersion = version;
+      __crackTpYUserEdited = false;
+      if (el.crackTpOriginY) el.crackTpOriginY.value = String(yMin);
+      __populateCrackMatchSelect();
+    } catch (_) { /* ignore */ }
+
     const dt = performance.now() - t0;
     const lines = res.matches.map(p => {
       if (matchMode === 'scored') return `${p.x} ${p.y} ${p.z}  score=${p.score}`;
@@ -4360,11 +4399,285 @@ el.crackCoords.addEventListener('click', async () => {
   } catch (err){
     console.error(err);
     el.crackStatus.textContent = 'Error while cracking - see console.';
+    try {
+      __lastCrackMatches = [];
+      __populateCrackMatchSelect();
+    } catch (_) {}
     el.crackOut.value = String(err?.message || err);
+
   } finally {
     el.crackCoords.disabled = false;
   }
 });
+
+
+
+// --- Grassfinder match -> teleport helper (EXPERIMENTAL) ---
+let __lastCrackMatches = [];
+let __lastCrackMatchMode = 'strict';
+let __lastCrackVersion = 'post1_12';
+let __crackTpYUserEdited = false;
+
+function __setCrackTpMsg(text, isError=false){
+  if (!el.crackTpMsg) return;
+  el.crackTpMsg.textContent = String(text ?? '');
+  el.crackTpMsg.classList.toggle('tp-error', Boolean(isError));
+}
+
+function __formatTpToken(n, axis){
+  // Always include a '.' for X/Z integers to avoid vanilla +0.5 centering on integer tokens.
+  if (!Number.isFinite(n)) n = 0;
+  const r = Math.round(n);
+  const isInt = Math.abs(n - r) < 1e-9;
+
+  const trim = (s) => String(s).replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'.0');
+
+  if (axis === 'x' || axis === 'z') {
+    if (isInt) return `${r}.0`;
+    // Keep high precision so camera tests match in-game.
+    return trim(n.toFixed(12));
+  }
+
+  // Y: no centering quirk, keep integers clean.
+  if (isInt) return String(r);
+  return trim(n.toFixed(12));
+}
+
+function __formatAngle(n){
+  if (!Number.isFinite(n)) n = 0;
+  const r = Math.round(n * 1000000) / 1000000;
+  const isInt = Math.abs(r - Math.round(r)) < 1e-9;
+  const trim = (s) => String(s).replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'.0');
+  return isInt ? String(Math.round(r)) : trim(r.toFixed(6));
+}
+
+async function __copyToClipboard(text){
+  const t = String(text ?? '');
+  if (!t) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(t);
+      return true;
+    }
+  } catch (_) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = t;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+function __getCrackReferenceOrigin(){
+  // Must match GF.rowsFromGrasses(): ignore CUBE and pick smallest id.
+  const ordered = [...grasses.values()]
+    .filter(g => String(g?.kind || '') !== 'CUBE')
+    .sort((a,b)=>a.id-b.id);
+  const first = ordered[0];
+  return first?.block ? first.block.clone() : null;
+}
+
+function __readCameraInputs(){
+  // Base entity position in the tool's current coordinate system.
+  const centerXZ = Boolean(el.centerTpXZ?.checked);
+  const x = parseMcTpAxis(el.camX?.value, 'x', 0, centerXZ);
+  const yIn = parseMcTpAxis(el.camY?.value, 'y', 0, centerXZ);
+  const z = parseMcTpAxis(el.camZ?.value, 'z', 0, centerXZ);
+  const yaw = num(el.yaw?.value, 0);
+  const pitch = clamp(num(el.pitch?.value, 0), -90, 90);
+  const feetMode = Boolean(el.useFeetY?.checked);
+  const feetY = feetMode ? yIn : (yIn - EYE_HEIGHT);
+  return { x, yIn, z, feetY, yaw, pitch, feetMode };
+}
+
+function __populateCrackMatchSelect(){
+  const sel = el.crackMatchSelect;
+  const btnMake = el.crackMakeTp;
+  const btnCopy = el.crackCopyTp;
+  const btnShift = el.crackApplyCamShift;
+
+  // Show/hide Origin Y helper depending on crack version.
+  try {
+    const wrap = document.querySelector('.crack-tp-originy');
+    const show = (__lastCrackVersion === 'post1_12');
+    if (wrap) wrap.classList.toggle('hidden', !show);
+    if (show && el.crackTpOriginY && !__crackTpYUserEdited) {
+      const firstY = (__lastCrackMatches?.[0]?.y ?? Math.round(num(el.crackYMin?.value, 62)));
+      el.crackTpOriginY.value = String(Math.round(firstY));
+    }
+  } catch (_) {}
+
+  if (!sel) return;
+
+  sel.innerHTML = '';
+  const has = Array.isArray(__lastCrackMatches) && __lastCrackMatches.length > 0;
+
+  sel.disabled = !has;
+  if (btnMake) btnMake.disabled = !has;
+  if (btnShift) btnShift.disabled = !has;
+  if (btnCopy) btnCopy.disabled = true;
+
+  if (!has) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(run crack first)';
+    sel.appendChild(opt);
+    if (el.crackTpOut) el.crackTpOut.value = '';
+    return;
+  }
+
+  for (let i=0;i<__lastCrackMatches.length;i++){
+    const m = __lastCrackMatches[i];
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    const base = `${m.x} ${m.y} ${m.z}`;
+    opt.textContent = (__lastCrackMatchMode === 'scored' && typeof m.score === 'number')
+      ? `${base}  (score=${m.score})`
+      : base;
+    sel.appendChild(opt);
+  }
+
+  // Auto-generate an initial command preview (non-copy) for convenience.
+  __updateCrackTpOutput(false);
+}
+
+function __selectedCrackMatch(){
+  const sel = el.crackMatchSelect;
+  if (!sel) return null;
+  const i = Number(sel.value);
+  if (!Number.isInteger(i) || i < 0 || i >= __lastCrackMatches.length) return __lastCrackMatches[0] ?? null;
+  return __lastCrackMatches[i] ?? null;
+}
+
+function __computeCrackShift(match){
+  const ref = __getCrackReferenceOrigin();
+  if (!ref) return { error: 'No reference block found. Place at least 1 non-cube texture block.' };
+  if (!match) return { error: 'No match selected.' };
+
+  const includeY = Boolean(el.crackTpIncludeY?.checked);
+  const dx = (match.x|0) - (ref.x|0);
+  const dz = (match.z|0) - (ref.z|0);
+  const version = (__lastCrackVersion === 'postb1_5') ? 'postb1_5' : 'post1_12';
+  const yIsFree = (version === 'post1_12');
+
+  // In 1.8+ mode, the hash ignores Y entirely, so the "match Y" is just Y min.
+  // When shifting Y, use the explicit Origin Y field.
+  let dy = 0;
+  let yAnchor = null;
+  if (includeY) {
+    if (yIsFree) {
+      yAnchor = Math.round(num(el.crackTpOriginY?.value, match.y|0));
+      dy = (yAnchor|0) - (ref.y|0);
+    } else {
+      yAnchor = (match.y|0);
+      dy = yAnchor - (ref.y|0);
+    }
+  }
+
+  return { dx, dy, dz, ref, version, yIsFree, yAnchor, includeY };
+}
+
+function __updateCrackTpOutput(wantCopyFeedback){
+  const out = el.crackTpOut;
+  if (!out) return;
+
+  const match = __selectedCrackMatch();
+  const shift = __computeCrackShift(match);
+  if (shift?.error) {
+    out.value = '';
+    if (el.crackCopyTp) el.crackCopyTp.disabled = true;
+    __setCrackTpMsg(shift.error, true);
+    return;
+  }
+
+  const cam = __readCameraInputs();
+  const target = String(el.crackTpTarget?.value || '@s').trim() || '@s';
+
+  const x2 = cam.x + shift.dx;
+  const z2 = cam.z + shift.dz;
+
+  // Apply shift in the same Y input space; convert to feet for /tp if needed.
+  const yIn2 = cam.yIn + shift.dy;
+  const yFeet2 = cam.feetMode ? yIn2 : (yIn2 - EYE_HEIGHT);
+
+  const cmd = `/tp ${target} ${__formatTpToken(x2, 'x')} ${__formatTpToken(yFeet2, 'y')} ${__formatTpToken(z2, 'z')} ${__formatAngle(cam.yaw)} ${__formatAngle(cam.pitch)}`;
+  out.value = cmd;
+  if (el.crackCopyTp) el.crackCopyTp.disabled = !cmd;
+
+  let note = '';
+  if (shift.yIsFree && shift.includeY) {
+    const yTxt = (shift.yAnchor == null) ? '?' : String(shift.yAnchor);
+    note = ` (1.8+: Y not cracked; using Origin Y=${yTxt})`;
+  }
+  __setCrackTpMsg(`Δ = (${shift.dx}, ${shift.dy}, ${shift.dz})${note}`, false);
+}
+
+function __shiftCameraByCrackMatch(){
+  const match = __selectedCrackMatch();
+  const shift = __computeCrackShift(match);
+  if (shift?.error) { __setCrackTpMsg(shift.error, true); return; }
+
+  const centerXZ = Boolean(el.centerTpXZ?.checked);
+
+  const x0 = parseMcTpAxis(el.camX?.value, 'x', 0, centerXZ);
+  const y0 = parseMcTpAxis(el.camY?.value, 'y', 0, centerXZ);
+  const z0 = parseMcTpAxis(el.camZ?.value, 'z', 0, centerXZ);
+
+  const x1 = x0 + shift.dx;
+  const y1 = y0 + shift.dy;
+  const z1 = z0 + shift.dz;
+
+  // Preserve exact positions even if "Center X/Z integers" is enabled.
+  el.camX.value = __formatTpToken(x1, 'x');
+  el.camY.value = __formatTpToken(y1, 'y');
+  el.camZ.value = __formatTpToken(z1, 'z');
+
+  updateCameraFromUI();
+  __updateCrackTpOutput(false);
+}
+
+// Hook up UI (safe if elements are absent in older builds)
+el.crackMatchSelect?.addEventListener('change', () => {
+  // In 1.8+ mode, match Y is arbitrary; keep Origin Y in sync unless the user overrode it.
+  try {
+    if (__lastCrackVersion === 'post1_12' && el.crackTpOriginY && !__crackTpYUserEdited) {
+      const m = __selectedCrackMatch();
+      const y = (m?.y ?? Math.round(num(el.crackYMin?.value, 62)));
+      el.crackTpOriginY.value = String(Math.round(y));
+    }
+  } catch (_) {}
+  __updateCrackTpOutput(false);
+});
+el.crackTpIncludeY?.addEventListener('change', () => __updateCrackTpOutput(false));
+el.crackTpOriginY?.addEventListener('input', () => {
+  __crackTpYUserEdited = true;
+  __updateCrackTpOutput(false);
+});
+el.crackTpTarget?.addEventListener('input', () => {
+  // Clear stale errors as the user edits.
+  if ((el.crackTpMsg?.textContent ?? '') && el.crackTpMsg?.classList?.contains('tp-error')) __setCrackTpMsg('', false);
+  __updateCrackTpOutput(false);
+});
+el.crackMakeTp?.addEventListener('click', () => __updateCrackTpOutput(false));
+el.crackApplyCamShift?.addEventListener('click', __shiftCameraByCrackMatch);
+el.crackCopyTp?.addEventListener('click', async () => {
+  const t = el.crackTpOut?.value || '';
+  const ok = await __copyToClipboard(t);
+  if (ok) __setCrackTpMsg('Copied /tp command to clipboard.', false);
+  else __setCrackTpMsg('Could not copy automatically. Select and copy manually.', true);
+});
+
+// Initialize select state
+__populateCrackMatchSelect();
 
 
 el.clearGrass.addEventListener('click', () => {
@@ -5331,7 +5644,9 @@ function syncSpecialModelOpacity(){
     // Update placed grass-block-cube meshes (and other per-face block models)
     for (const g of grasses.values()) {
       if (!g || !g.mesh) continue;
-      if (g.kind !== 'CUBE' && g.kind !== 'SUNFLOWER') continue;
+      // Some foliage kinds render via block-model/per-segment meshes with their own cloned
+      // materials (not shared via foliageMatCache). These need manual opacity updates.
+      if (g.kind !== 'CUBE' && g.kind !== 'SUNFLOWER' && g.kind !== 'BAMBOO' && g.kind !== 'POINTED_DRIPSTONE') continue;
       g.mesh.traverse(obj => {
         if (!obj.isMesh || !obj.material) return;
         const mats = Array.isArray(obj.material) ? obj.material : [obj.material];

@@ -172,6 +172,21 @@
             <span id="crackStatus" class="hint">Uses current offset data (no need to export).</span>
           </div>
           <textarea id="crackOut" spellcheck="false" readonly placeholder="Possible coordinates will appear here..."></textarea>
+          <div class="row crack-tp-row">
+            <label class="crack-tp-label">Use match
+              <select id="crackMatchSelect" disabled></select>
+            </label>
+            <label>Target <input id="crackTpTarget" type="text" value="@s" spellcheck="false" /></label>
+            <label class="toggle" title="Shift Y too. Note: in 1.8+ mode, Grassfinder ignores Y, so the match's Y is just Y min. Set Origin Y below if you want correct vertical positioning."><input id="crackTpIncludeY" type="checkbox" checked /> Shift Y</label>
+            <label class="crack-tp-originy hidden" title="Used only in 1.8+ mode (where Grassfinder ignores Y). Set this to the real Y of the first (lowest-id) offset entry.">Origin Y <input id="crackTpOriginY" type="number" step="1" value="62" /></label>
+<button id="crackCopyTp" type="button" disabled>Copy</button>
+            <button id="crackApplyCamShift" type="button" disabled title="Shift the camera inputs by Δ = (match - first placed grass block). Offsets/blocks stay where they are." class="hidden">Shift camera</button>
+            <span id="crackTpMsg" class="hint" aria-live="polite"></span>
+          </div>
+          <input id="crackTpOut" type="text" readonly spellcheck="false" placeholder="/tp @s ..." />
+          <div class="hint crack-tp-hint">
+            Experimental: converts your relative camera position to match real camera position, making it simple to check if offsets match in-game
+          </div>
         </div>
 
       </details>

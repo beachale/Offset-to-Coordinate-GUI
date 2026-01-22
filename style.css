@@ -168,6 +168,24 @@ input[type="number"]{ width: 92px; }
 }
 .tp-row .hint{ margin-left: 0; }
 .tp-row .hint.tp-error{ color: var(--danger); }
+.hint.tp-error{ color: var(--danger); }
+
+/* Grassfinder -> teleport (experimental) */
+.crack-tp-row .crack-tp-label{ flex: 1 1 240px; }
+.crack-tp-row .crack-tp-label select{ width: 100%; min-width: 220px; }
+#crackTpTarget{ width: 86px; }
+#crackTpOriginY{ width: 76px; }
+#crackTpOut{
+  width: calc(100% - 24px);
+  margin: 0 12px 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+.crack-tp-hint{
+  padding: 0 12px 10px 12px;
+  margin-top: -6px;
+}
+
 
 input[type="number"]:focus,
 input[type="text"]:focus,
