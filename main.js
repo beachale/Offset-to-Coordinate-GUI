@@ -380,6 +380,7 @@ function rebuildRenderer(){
   renderer.setClearColor(0x000000, 0);
   try { resizeWebGL(); } catch (_) { /* resizeWebGL not ready yet during early init */ }
   try { old?.dispose?.(); } catch (_) {}
+  try { requestRender(); } catch (_) {}
 }
 const scene = new THREE.Scene();
 scene.add(new THREE.AmbientLight(0xffffff, 0.35));
@@ -840,6 +841,7 @@ function setOverlayImage(src, w, h){
   overlayImage = src;
   overlayImageW = Math.max(0, Math.trunc(Number(w) || 0));
   overlayImageH = Math.max(0, Math.trunc(Number(h) || 0));
+  try { requestRender(); } catch (_) {}
 }
 
 // Minimal BMP decoder (uncompressed 24/32-bit). Used as a fallback when the browser can't decode BMP.
@@ -933,6 +935,7 @@ let grassOpacity = 1.0;
 function syncOverlayUI(){
   overlayOpacity = clamp(num(el.overlayOpacity?.value, 1), 0, 1);
   overlayVisible = Boolean(el.showOverlay?.checked);
+  try { requestRender(); } catch (_) {}
 }
 
 function syncGrassOpacityUI(){
@@ -964,6 +967,7 @@ function syncGrassOpacityUI(){
     if (mats.base) { mats.base.opacity = grassOpacity; mats.base.transparent = (grassOpacity < 1); }
     if (mats.placement) { mats.placement.opacity = clamp(grassOpacity * 0.65, 0, 1); mats.placement.transparent = true; }
   }
+  try { requestRender(); } catch (_) {}
 }
 
 
@@ -976,6 +980,7 @@ function syncGridUI(){
   const on = Boolean(el.showGrid?.checked);
   gridLines.visible = on;
   chunkLines.visible = on;
+  try { requestRender(); } catch (_) {}
 }
 
 function syncSceneVisUI(){
@@ -986,6 +991,7 @@ function syncSceneVisUI(){
 
   const showGrass = Boolean(el.showGrass?.checked);
   if (grassGroup) grassGroup.visible = showGrass;
+  try { requestRender(); } catch (_) {}
 }
 
 function syncVisibilityUI(){
@@ -997,6 +1003,7 @@ function syncVisibilityUI(){
   if (originMarker) originMarker.visible = gridVisible;
 
   if (grassGroup) grassGroup.visible = Boolean(el.showGrass?.checked);
+  try { requestRender(); } catch (_) {}
 }
 
 el.overlayOpacity.addEventListener('input', syncOverlayUI);
@@ -1005,6 +1012,8 @@ el.grassOpacity?.addEventListener('input', () => {
   try { syncSpecialModelOpacity(); } catch (_) { /* placement mode not initialized yet */ }
 });
 el.showOverlay.addEventListener('change', syncOverlayUI);
+el.showBorder?.addEventListener('change', () => { try { requestRender(); } catch (_) {} });
+window.addEventListener('resize', () => { try { requestRender(); } catch (_) {} });
 el.gridRadius?.addEventListener('input', () => {
   syncGridRadiusUI();
   // Rebuild helpers around the current camera position.
@@ -1068,6 +1077,7 @@ function applyWorkspaceAndRenderSize(workW, workH, renW, renH) {
   if (el.renderH) el.renderH.value = String(RENDER_H);
 
   resizeWebGL();
+  try { requestRender(); } catch (_) {}
 }
 
 el.applyViewSize?.addEventListener('click', () => {
@@ -1114,6 +1124,7 @@ function setOffsetWorkspacePos(offsetX, offsetY, worldX, worldY) {
   centerY = worldY - (offsetY - viewCanvas.clientHeight / 2) / zoom;
   roundedCenterX = Math.round(centerX * zoom) / zoom;
   roundedCenterY = Math.round(centerY * zoom) / zoom;
+  try { requestRender(); } catch (_) {}
 }
 
 viewCanvas.addEventListener('mousedown', (event) => {
@@ -1227,6 +1238,7 @@ really old nudge = ${useReallyOldNudge ? '-0.10' : 'off'}`;
 
   updateHelpersAroundPlayer(new THREE.Vector3(xF, feetYF, zF));
   ground.position.set(xF, 0, zF);
+  try { requestRender(); } catch (_) {}
 }
 
 function syncCamYDisplayToMode() {
@@ -1283,7 +1295,6 @@ syncCamYDisplayToMode();
 syncOverlayUI();
 syncGridRadiusUI();
 syncGridUI();
-syncGridUI();
 syncSceneVisUI();
 
 
@@ -1293,6 +1304,7 @@ syncSceneVisUI();
 function syncGrassUI(){
   const on = Boolean(el.showGrass?.checked);
   grassGroup.visible = on;
+  try { requestRender(); } catch (_) {}
 }
 
 el.showGrass.addEventListener('change', syncGrassUI);
@@ -1479,6 +1491,7 @@ async function applyResourcePackSwitch(){
   try { await refreshAllFoliageTextures(); } catch (_) {}
   try { rebuildAllPlacedGrassMeshes(); } catch (_) {}
   try { syncSpecialModelOpacity(); } catch (_) {}
+  try { requestRender(); } catch (_) {}
 }
 
 async function handleResourcePackFile(file){
@@ -1979,6 +1992,7 @@ function fadeMaterialOpacity(mat, targetOpacity = 1, ms = 120){
   function step(now){
     const k = Math.min(1, (now - start) / ms);
     mat.opacity = from + (targetOpacity - from) * k;
+    try { requestRender(); } catch (_) {}
     if (k < 1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -2063,6 +2077,7 @@ async function refreshAllFoliageTextures(){
   await Promise.all(jobs);
   // Re-apply manual animated frame selection (tall seagrass).
   applyTallSeagrassFrameToCachedMats();
+  try { requestRender(); } catch (_) {}
 }
 
 // Cache block model JSON by name (e.g. 'mangrove_propagule_hanging_0').
@@ -2089,12 +2104,12 @@ modelJsonCache.set('tall_seagrass_bottom', Promise.resolve(LOCAL_TALL_SEAGRASS_B
 modelJsonCache.set('tall_seagrass_top', Promise.resolve(LOCAL_TALL_SEAGRASS_TOP_MODEL));
 
 async function getBlockTexture(texName, opts){
-  const key = String(texName || '').trim();
-  if (!key) return placeholder;
-
   const useMips = Boolean(opts && opts.useMips);
   const cache = useMips ? textureCacheMipped : textureCacheNoMips;
   const placeholder = useMips ? PLACEHOLDER_TEX_MIP : PLACEHOLDER_TEX_NO_MIP;
+
+  const key = String(texName || '').trim();
+  if (!key) return placeholder;
 
   // IMPORTANT: we may have *in-flight* loads.
   // Older code cached PLACEHOLDER_TEX immediately, which made any concurrent callers
@@ -2110,11 +2125,13 @@ async function getBlockTexture(texName, opts){
       configureMcTexture(t, { useMips });
       fixAnimatedStripTexture(t);
       cache.set(key, t);
+      try { requestRender(); } catch (_) {}
       return t;
     } catch (e) {
       console.warn('Failed to load texture', { key, url }, e);
       cache.set(key, placeholder);
-      return PLACEHOLDER_TEX;
+      try { requestRender(); } catch (_) {}
+      return placeholder;
     }
   })();
 
@@ -3511,6 +3528,7 @@ function makeAsyncMinecraftModelMesh(modelName, material, opts = undefined){
     }
     const built = buildMinecraftModelGroup(model, material, opts);
     root.add(...built.children);
+    try { requestRender(); } catch (_) {}
 
     // Some models are built asynchronously (e.g., tall seagrass top/bottom, sunflower top).
     // If something is currently selected, re-apply selection materials now that real meshes exist.
@@ -4087,6 +4105,7 @@ function updateGrassMeshTransform(g){
   // *block corner*, then translates by BlockState.getOffset(pos). So the correct world-space
   // placement is simply: blockPosCorner + offset.
   g.mesh.position.copy(blockOrigin.add(offset));
+  try { requestRender(); } catch (_) {}
 }
 
 // --- Rebuild helpers (selected-instance variant editing) ---
@@ -4246,6 +4265,9 @@ function setSelected(id){
       });
     }
   }
+
+
+  try { requestRender(); } catch (_) {}
 
 	// sync UI
   if (id == null) {
@@ -4472,6 +4494,7 @@ function removeGrass(id){
   // pick a new selection if any remain
   const first = grasses.values().next().value;
   if (first) setSelected(first.id);
+  try { requestRender(); } catch (_) {}
 }
 
 function clearAllGrass(){
@@ -4481,6 +4504,7 @@ function clearAllGrass(){
   selectedId = null;
   refreshGrassList();
   if (placementMode) updatePlacementPreviewBlockedState();
+  try { requestRender(); } catch (_) {}
 }
 
 // --- Offset UI apply ---
@@ -5687,6 +5711,7 @@ function setPlacementPreviewBlocked(blocked){
       m.needsUpdate = true;
     }
   });
+  try { requestRender(); } catch (_) {}
 }
 
 function updatePlacementPreviewBlockedState(){
@@ -5728,6 +5753,7 @@ function ensurePlacementPreview(){
   placementPreview.userData.__previewFoliageId = activeFoliageId;
   scene.add(placementPreview);
   updatePlacementPreviewBlockedState();
+  try { requestRender(); } catch (_) {}
 }
 
 
@@ -5783,6 +5809,7 @@ function updatePlacementPreviewFromEvent(e){
     placementPreview.position.set(b.x + off.x, b.y + off.y, b.z + off.z);
   }
   updatePlacementPreviewBlockedState();
+  try { requestRender(); } catch (_) {}
 }
 
 function enterPlacementMode(startY){
@@ -5795,6 +5822,7 @@ function enterPlacementMode(startY){
   const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
   placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
   updatePlacementPreviewBlockedState();
+  try { requestRender(); } catch (_) {}
 }
 
 function computeBlockInFrontOfCameraSameY(){
@@ -5822,11 +5850,13 @@ function enterPlacementModeAtBlock(startBlock){
   const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
   placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
   updatePlacementPreviewBlockedState();
+  try { requestRender(); } catch (_) {}
 }
 
 function exitPlacementMode(){
   placementMode = false;
   if (placementPreview) placementPreview.visible = false;
+  try { requestRender(); } catch (_) {}
 }
 
 // Disable browser context menu on viewport canvas.
@@ -5916,6 +5946,7 @@ window.addEventListener('keydown', (e) => {
         const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
         placementPreview.position.set(placementBlock.x + off.x, placementBlock.y + off.y, placementBlock.z + off.z);
       }
+      try { requestRender(); } catch (_) {}
       e.preventDefault();
     }
     // ESC cancels placement.
@@ -6036,13 +6067,24 @@ function syncSpecialModelOpacity(){
         }
       });
     }
+    try { requestRender(); } catch (_) {}
   } catch (_) {
     // ignore (defensive: placement mode not initialized yet)
   }
 }
-// --- Render loop ---
-function animate(){
-  updateCameraFromUI();
+// --- Render (on-demand) ---
+let __renderQueued = false;
+let __readyToRender = false;
+
+function requestRender(){
+  if (!__readyToRender) return;
+  if (__renderQueued) return;
+  __renderQueued = true;
+  requestAnimationFrame(renderFrame);
+}
+
+function renderFrame(){
+  __renderQueued = false;
   // Render the 3D scene to the offscreen WebGL canvas (RENDER_WxRENDER_H).
   renderer.render(scene, camera);
 
@@ -6099,7 +6141,7 @@ function animate(){
     }
   }
 
-  requestAnimationFrame(animate);
 }
-animate();
 
+__readyToRender = true;
+requestRender();
