@@ -3,6 +3,12 @@ import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 const foliageMatCache = new Map();
 const blockCubeMatCache = new Map();
 
+// Separate texture caches so we can mimic Minecraft's behavior:
+// - Cube blocks (solid/cutout-mipped style) use mipmaps (controlled by the video setting)
+// - Cross / x-shaped / bamboo / dripstone etc. do NOT use mipmaps (render type without mips)
+const textureCacheMipped = new Map();
+const textureCacheNoMips = new Map();
+
 // Float32 helper (matches Java's (float) casts via Math.fround)
 const f = Math.fround;
 
@@ -551,6 +557,7 @@ const el = {
   viewport: document.querySelector('.viewport'),
   progArtToggle: document.getElementById('progArtToggle'),
   msaaToggle: document.getElementById('msaaToggle'),
+  mipLevels: document.getElementById('mipLevels'),
   resourcePackFile: document.getElementById('resourcePackFile'),
   resourcePackLoad: document.getElementById('resourcePackLoad'),
   resourcePackUnload: document.getElementById('resourcePackUnload'),
@@ -824,7 +831,7 @@ function teleportFromTpInput() {
 let overlayImage = null; // CanvasImageSource
 let overlayImageW = 0;
 let overlayImageH = 0;
-let overlayOpacity = 0.65;
+let overlayOpacity = 1;
 let overlayVisible = true;
 
 function overlayHasImage(){ return !!overlayImage && overlayImageW > 0 && overlayImageH > 0; }
@@ -924,7 +931,7 @@ let grassOpacity = 1.0;
 // Now we cache per-foliage materials in ensureFoliageMats().
 
 function syncOverlayUI(){
-  overlayOpacity = clamp(num(el.overlayOpacity?.value, 0.65), 0, 1);
+  overlayOpacity = clamp(num(el.overlayOpacity?.value, 1), 0, 1);
   overlayVisible = Boolean(el.showOverlay?.checked);
 }
 
@@ -1348,13 +1355,16 @@ function syncResourcePackUI(){
 }
 
 function disposeCachedTextures(){
-  for (const v of textureCache.values()) {
+  for (const cache of [textureCacheMipped, textureCacheNoMips]) {
+    for (const v of cache.values()) {
     try {
       // v can be a Promise during streaming.
-      if (v && typeof v.then !== 'function' && v !== PLACEHOLDER_TEX && v.dispose) v.dispose();
+      if (v && typeof v.then !== 'function' && v !== PLACEHOLDER_TEX_NO_MIP && v !== PLACEHOLDER_TEX_MIP && v !== PLACEHOLDER_TEX && v.dispose) v.dispose();
     } catch (_) {}
+    }
   }
-  textureCache.clear();
+  textureCacheMipped.clear();
+  textureCacheNoMips.clear();
 }
 
 function resetAssetCachesForPackSwitch(){
@@ -1528,36 +1538,351 @@ if (el.resourcePackUnload) {
 
 syncResourcePackUI();
 
+// --- Minecraft-like mipmaps (parity-ish) ---
+// Matches the in-game idea: a user-selected mip chain depth + special handling for cutout (alphaTest) textures.
+let mcMipmapLevels = 0; // 0..4 (Minecraft video setting)
+try { mcMipmapLevels = Math.max(0, Math.min(4, Math.trunc(Number(el.mipLevels?.value ?? 0)))); } catch (_) {}
+
+
+function syncMipLevelsUI(){
+  if (!el.mipLevels) return;
+  const v = Math.max(0, Math.min(4, Math.trunc(Number(mcMipmapLevels) || 0)));
+  el.mipLevels.value = String(v);
+}
+
+async function applyMipmapSettingsSwitch(){
+  // Rebuild textures + meshes so every material gets the new sampler + mip chain.
+  resetAssetCachesForPackSwitch();
+  try { await refreshAllFoliageTextures(); } catch (_) {}
+  try { rebuildAllPlacedGrassMeshes(); } catch (_) {}
+  try { syncSpecialModelOpacity(); } catch (_) {}
+}
+
+if (el.mipLevels){
+  syncMipLevelsUI();
+  el.mipLevels.addEventListener('change', async () => {
+    mcMipmapLevels = Math.max(0, Math.min(4, Math.trunc(Number(el.mipLevels.value) || 0)));
+    syncMipLevelsUI();
+    await applyMipmapSettingsSwitch();
+  });
+}
+
 const texLoader = new THREE.TextureLoader();
 texLoader.setCrossOrigin('anonymous');
 
-function configureMcTexture(t){
+function configureMcTexture(t, opts){
   if (!t) return;
   t.colorSpace = THREE.SRGBColorSpace;
+
+  const useMips = Boolean(opts && opts.useMips);
+
+  // Minecraft-style sampling defaults:
+  // - Nearest for magnification
+  // - Nearest-per-mip + linear blend between mips for minification (GL_NEAREST_MIPMAP_LINEAR)
   t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
+
+  const levels = useMips ? Math.max(0, Math.min(4, Math.trunc(Number(mcMipmapLevels) || 0))) : 0;
+
+  // Clear any prior manual mip chain so Three.js doesn't upload stale levels.
+  try { t.mipmaps = []; } catch (_) {}
+
+  if (levels > 0) {
+    t.minFilter = THREE.NearestMipmapLinearFilter;
+    // We provide our own mip chain (Minecraft-ish), so disable GPU autogen.
+    t.generateMipmaps = false;
+    try { applyMinecraftMipmapsToTexture(t, levels); } catch (e) { console.warn('[Mipmaps] Failed, falling back to no mips', e); t.minFilter = THREE.NearestFilter; }
+  } else {
+    t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+  }
+
   t.needsUpdate = true;
 }
 
 
 
+
+// ------------------------------------------------------------
+// Minecraft-ish mipmap generation (CPU) with cutout coverage
+// ------------------------------------------------------------
+const __SRGB8_TO_LINEAR = (() => {
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++){
+    const c = i / 255;
+    lut[i] = (c <= 0.04045) ? (c / 12.92) : Math.pow((c + 0.055) / 1.055, 2.4);
+  }
+  return lut;
+})();
+
+function __linearToSrgb8(x){
+  // x in [0,1]
+  x = (x <= 0) ? 0 : (x >= 1 ? 1 : x);
+  const s = (x <= 0.0031308) ? (x * 12.92) : (1.055 * Math.pow(x, 1/2.4) - 0.055);
+  const v = Math.round(s * 255);
+  return v < 0 ? 0 : (v > 255 ? 255 : v);
+}
+
+function __isPowerOfTwo(n){
+  n = n | 0;
+  return n > 0 && (n & (n - 1)) === 0;
+}
+
+function __maxAdditionalMipLevels(w, h){
+  // Number of additional levels beyond level 0 (e.g. 16->4, 32->5).
+  w = w | 0; h = h | 0;
+  let levels = 0;
+  while (w > 1 && h > 1) { w >>= 1; h >>= 1; levels++; }
+  return levels;
+}
+
+function __canvasFromImage(img){
+  const w = img.width | 0, h = img.height | 0;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  return c;
+}
+
+function __getImageDataFromCanvas(c){
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  return ctx.getImageData(0, 0, c.width, c.height);
+}
+
+function __putImageDataToCanvas(c, id){
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.putImageData(id, 0, 0);
+}
+
+function __hasAnyTransparency(data){
+  // data is Uint8ClampedArray RGBA
+  for (let i = 3; i < data.length; i += 4){
+    if (data[i] !== 255) return true;
+  }
+  return false;
+}
+
+function __coverageAtThreshold(data, thresh){
+  // fraction of pixels with alpha >= thresh
+  let pass = 0;
+  const n = (data.length / 4) | 0;
+  for (let i = 3; i < data.length; i += 4) if ((data[i] | 0) >= thresh) pass++;
+  return n ? (pass / n) : 0;
+}
+
+function __coverageWithScale(data, thresh, scale){
+  let pass = 0;
+  const n = (data.length / 4) | 0;
+  for (let i = 3; i < data.length; i += 4){
+    const a = data[i] | 0;
+    const as = Math.max(0, Math.min(255, Math.round(a * scale)));
+    if (as >= thresh) pass++;
+  }
+  return n ? (pass / n) : 0;
+}
+
+function __scaleAlphaToMatchCoverage(data, thresh, targetCoverage){
+  // Find scale s such that coverage(alpha*s) ~= targetCoverage.
+  // Monotonic in s, so binary search.
+  if (!Number.isFinite(targetCoverage)) return 1;
+  targetCoverage = Math.max(0, Math.min(1, targetCoverage));
+  if (targetCoverage <= 0) return 0;
+  if (targetCoverage >= 1) return 10;
+
+  let lo = 0.0, hi = 10.0;
+  for (let it = 0; it < 16; it++){
+    const mid = (lo + hi) * 0.5;
+    const cov = __coverageWithScale(data, thresh, mid);
+    if (cov < targetCoverage) lo = mid; else hi = mid;
+  }
+  return (lo + hi) * 0.5;
+}
+
+function __downsample2x2_meanLinear(prev, w, h){
+  // prev: Uint8ClampedArray, w,h are prev dims
+  const w2 = Math.max(1, w >> 1);
+  const h2 = Math.max(1, h >> 1);
+  const out = new Uint8ClampedArray(w2 * h2 * 4);
+
+  for (let y2 = 0; y2 < h2; y2++){
+    const y0 = y2 * 2;
+    const y1 = Math.min(h - 1, y0 + 1);
+    for (let x2 = 0; x2 < w2; x2++){
+      const x0 = x2 * 2;
+      const x1 = Math.min(w - 1, x0 + 1);
+
+      const i00 = (y0 * w + x0) * 4;
+      const i10 = (y0 * w + x1) * 4;
+      const i01 = (y1 * w + x0) * 4;
+      const i11 = (y1 * w + x1) * 4;
+
+      // Convert sRGB->linear via LUT, average in linear space.
+      const r = (__SRGB8_TO_LINEAR[prev[i00]] + __SRGB8_TO_LINEAR[prev[i10]] + __SRGB8_TO_LINEAR[prev[i01]] + __SRGB8_TO_LINEAR[prev[i11]]) * 0.25;
+      const g = (__SRGB8_TO_LINEAR[prev[i00+1]] + __SRGB8_TO_LINEAR[prev[i10+1]] + __SRGB8_TO_LINEAR[prev[i01+1]] + __SRGB8_TO_LINEAR[prev[i11+1]]) * 0.25;
+      const b = (__SRGB8_TO_LINEAR[prev[i00+2]] + __SRGB8_TO_LINEAR[prev[i10+2]] + __SRGB8_TO_LINEAR[prev[i01+2]] + __SRGB8_TO_LINEAR[prev[i11+2]]) * 0.25;
+
+      // Alpha is averaged in linear integer space.
+      const a = ((prev[i00+3] + prev[i10+3] + prev[i01+3] + prev[i11+3]) * 0.25);
+
+      const o = (y2 * w2 + x2) * 4;
+      out[o]   = __linearToSrgb8(r);
+      out[o+1] = __linearToSrgb8(g);
+      out[o+2] = __linearToSrgb8(b);
+      out[o+3] = Math.max(0, Math.min(255, Math.round(a)));
+    }
+  }
+  return { data: out, w: w2, h: h2 };
+}
+
+function __buildMinecraftMipChain(baseCanvas, requestedLevels, alphaTestThreshold255 = 128){
+  // Returns an array of canvases [level0, level1, ...].
+  const baseId = __getImageDataFromCanvas(baseCanvas);
+  const baseData = baseId.data;
+  const w0 = baseCanvas.width | 0, h0 = baseCanvas.height | 0;
+
+  const maxLevels = __maxAdditionalMipLevels(w0, h0);
+  const levels = Math.max(0, Math.min(requestedLevels | 0, maxLevels));
+
+  // Decide strategy: if any transparency exists, use CUTOUT coverage scaling.
+  const cutout = __hasAnyTransparency(baseData);
+  const targetCoverage = cutout ? __coverageAtThreshold(baseData, alphaTestThreshold255 | 0) : 0;
+
+  const chain = [];
+  chain.push(baseCanvas);
+
+  let prev = baseData;
+  let w = w0, h = h0;
+
+  for (let lv = 1; lv <= levels; lv++){
+    const ds = __downsample2x2_meanLinear(prev, w, h);
+
+    // If this is a cutout texture (plants), scale alpha to preserve coverage
+    // relative to level0 at the alphaTest threshold.
+    if (cutout) {
+      const s = __scaleAlphaToMatchCoverage(ds.data, alphaTestThreshold255 | 0, targetCoverage);
+      if (Number.isFinite(s) && s !== 1) {
+        for (let i = 3; i < ds.data.length; i += 4) {
+          ds.data[i] = Math.max(0, Math.min(255, Math.round((ds.data[i] | 0) * s)));
+        }
+      }
+    }
+
+    const c = document.createElement('canvas');
+    c.width = ds.w; c.height = ds.h;
+    const id = new ImageData(ds.data, ds.w, ds.h);
+    __putImageDataToCanvas(c, id);
+
+    chain.push(c);
+
+    prev = ds.data;
+    w = ds.w; h = ds.h;
+  }
+
+  return { chain, cutout, levels };
+}
+
+function applyMinecraftMipmapsToTexture(tex, levels){
+  if (!tex) return;
+
+  // If the texture is an animated vertical strip, we can optionally crop to a single frame
+  // so mipmaps work even on WebGL1 (NPOT mipmaps are restricted).
+  // The strip handlers below will take over if needed.
+  const img = tex.image;
+  if (!img || !img.width || !img.height) return;
+
+  // If an animated-strip canvas mode is active, the strip functions will call this again after updating tex.image.
+  if (tex.userData?.__stripUsesCanvas) {
+    // tex.image is already the per-frame canvas
+  }
+
+  const w = tex.image.width | 0, h = tex.image.height | 0;
+  if (!w || !h) return;
+
+  // Mipmaps require POT dims in WebGL1; WebGL2 allows NPOT, but we keep POT to avoid silent failures.
+  if (!__isPowerOfTwo(w) || !__isPowerOfTwo(h)) {
+    // Fall back: keep nearest only (still deterministic).
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    try { tex.mipmaps = []; } catch (_) {}
+    return;
+  }
+
+  // Cache key to avoid regenerating repeatedly.
+  const key = `mcMip|${w}x${h}|L${levels}|img:${(img.currentSrc || img.src || '')}|frame:${tex.userData?.__stripFrame ?? -1}`;
+  if (tex.userData && tex.userData.__mcMipKey === key) return;
+
+  let baseCanvas = null;
+  try {
+    baseCanvas = __canvasFromImage(tex.image);
+  } catch (e) {
+    // If the image is CORS-tainted, we can't read pixels. Fall back to GPU mipmaps.
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.NearestMipmapLinearFilter;
+    tex.needsUpdate = true;
+    return;
+  }
+
+  // Build chain and attach to texture.
+  const alphaThresh = 128; // matches plant alphaTest=0.5 in this tool
+  const res = __buildMinecraftMipChain(baseCanvas, levels, alphaThresh);
+
+  // IMPORTANT: Three.js treats `texture.mipmaps` as a complete mip chain when provided.
+  // Provide [level0, level1, ...].
+  tex.image = res.chain[0];
+  tex.mipmaps = res.chain;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+
+  tex.userData = tex.userData || {};
+  tex.userData.__mcMipKey = key;
+
+  // Invalidate alpha-pick cache (texture UUID remains the same).
+  try { if (typeof __texAlphaCache !== 'undefined') __texAlphaCache.delete(tex.uuid); } catch (_) {}
+}
+
+
 function fixAnimatedStripTexture(tex){
   try {
-    // Minecraft animated textures are usually vertical strips of 16x16 frames.
-    // For GUI preview we show a single frame by adjusting repeat/offset.
+    // Minecraft animated textures are usually vertical strips of N frames of size WxW.
+    // For GUI preview we show a single frame.
     const img = tex && tex.image;
     if (!img || !img.width || !img.height) return;
 
     const frames = Math.round(img.height / img.width);
     if (!Number.isFinite(frames) || frames <= 1) return;
 
-    // Store for manual frame selection (e.g. tall seagrass).
     tex.userData = tex.userData || {};
     tex.userData.__stripFrames = frames;
+    tex.userData.__stripSrcImage = img; // keep the full strip even if we swap tex.image later
     if (!Number.isFinite(tex.userData.__stripFrame)) tex.userData.__stripFrame = 0;
 
-    // Default to frame 0.
+    // If mipmaps are enabled, force a POT per-frame canvas. This avoids WebGL1 NPOT mipmap restrictions.
+    const wantMip = (Math.max(0, Math.min(4, Math.trunc(Number(mcMipmapLevels) || 0))) > 0);
+
+    if (wantMip) {
+      const size = img.width | 0; // frame is WxW
+      let c = tex.userData.__stripCanvas;
+      if (!c || (c.width|0) !== size || (c.height|0) !== size) {
+        c = document.createElement('canvas');
+        c.width = size; c.height = size;
+        tex.userData.__stripCanvas = c;
+      }
+      tex.userData.__stripUsesCanvas = true;
+
+      // Set image to the per-frame canvas; frame selection will draw into it.
+      tex.image = c;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.repeat.set(1, 1);
+      tex.offset.set(0, 0);
+
+      // Default to frame 0.
+      setAnimatedStripTextureFrame(tex, tex.userData.__stripFrame);
+      return;
+    }
+
+    // Default (no mipmaps): use repeat/offset into the full strip.
     setAnimatedStripTextureFrame(tex, tex.userData.__stripFrame);
   } catch (e) {
     // ignore
@@ -1567,13 +1892,14 @@ function fixAnimatedStripTexture(tex){
 function setAnimatedStripTextureFrame(tex, frameIndex, frameCountOverride = null){
   try {
     if (!tex) return;
-    const img = tex.image;
-    if (!img || !img.width || !img.height) return;
 
-    const detected = Math.round(img.height / img.width);
+    // Prefer the preserved strip source image if available.
+    const src = tex.userData?.__stripSrcImage || tex.image;
+    if (!src || !src.width || !src.height) return;
+
+    const detected = Math.round(src.height / src.width);
     let frames = Number.isFinite(detected) ? detected : 1;
     if (Number.isFinite(frameCountOverride) && frameCountOverride > 1) {
-      // Prefer the override if it matches the strip shape; otherwise fall back.
       if (frames <= 1 || frames == frameCountOverride) frames = frameCountOverride;
     }
     if (!Number.isFinite(frames) || frames <= 1) return;
@@ -1585,10 +1911,42 @@ function setAnimatedStripTextureFrame(tex, frameIndex, frameCountOverride = null
     tex.userData.__stripFrames = n;
     tex.userData.__stripFrame = f;
 
+    // Canvas mode (mipmaps enabled): draw the chosen frame into a POT canvas and rebuild mip chain.
+    if (tex.userData.__stripUsesCanvas && tex.userData.__stripCanvas) {
+      const c = tex.userData.__stripCanvas;
+      const size = src.width | 0;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.clearRect(0, 0, size, size);
+
+      // Frame 0 is at the top of the strip.
+      const sy = (f * size) | 0;
+      ctx.drawImage(src, 0, sy, size, size, 0, 0, size, size);
+
+      tex.image = c;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.repeat.set(1, 1);
+      tex.offset.set(0, 0);
+
+      // Rebuild mipmaps for the current frame.
+      const levels = useMips ? Math.max(0, Math.min(4, Math.trunc(Number(mcMipmapLevels) || 0))) : 0;
+      if (levels > 0) {
+        tex.minFilter = THREE.NearestMipmapLinearFilter;
+        tex.magFilter = THREE.NearestFilter;
+        tex.generateMipmaps = false;
+        try { applyMinecraftMipmapsToTexture(tex, levels); } catch (_) {}
+      } else {
+        tex.minFilter = THREE.NearestFilter;
+      }
+
+      tex.needsUpdate = true;
+      return;
+    }
+
+    // Default mode: use repeat/offset into the full strip.
     tex.wrapS = THREE.ClampToEdgeWrapping;
     tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.repeat.set(1, 1 / n);
-    // Frame 0 is at the top of the strip.
     tex.offset.set(0, 1 - (f + 1) / n);
     tex.needsUpdate = true;
   } catch (e) {
@@ -1599,14 +1957,17 @@ function setAnimatedStripTextureFrame(tex, frameIndex, frameCountOverride = null
 
 // A tiny placeholder so meshes don't flash white while textures stream in.
 // Fully transparent (1x1) so cutout geometry stays invisible until the real texture is ready.
-function makePlaceholderTexture(){
+function makePlaceholderTexture(useMips){
   const data = new Uint8Array([0, 0, 0, 0]); // 1x1 transparent
   const t = new THREE.DataTexture(data, 1, 1);
-  configureMcTexture(t);
+  configureMcTexture(t, { useMips: Boolean(useMips) });
   return t;
 }
 
-const PLACEHOLDER_TEX = makePlaceholderTexture();
+const PLACEHOLDER_TEX_NO_MIP = makePlaceholderTexture(false);
+const PLACEHOLDER_TEX_MIP = makePlaceholderTexture(true);
+// Default placeholder used by most foliage/cross models.
+const PLACEHOLDER_TEX = PLACEHOLDER_TEX_NO_MIP;
 
 // Small UX polish: fade meshes in once their texture arrives (avoids harsh pop-in).
 function fadeMaterialOpacity(mat, targetOpacity = 1, ms = 120){
@@ -1651,13 +2012,12 @@ function intendedOpacityOf(mat, fallback = 1){
 
 
 // Cache textures by name (e.g. 'fern', 'tall_grass_bottom').
-const textureCache = new Map();
-
+// Texture caches are split: textureCacheMipped / textureCacheNoMips
 
 function clearProgrammerArtTextureCache(){
   // Because the cache key is just the texture name, switching packs
   // requires invalidating any texture names we may swap.
-  for (const k of PROGRAMMER_ART_KEYS) textureCache.delete(k);
+  for (const k of PROGRAMMER_ART_KEYS) { textureCacheMipped.delete(k); textureCacheNoMips.delete(k); }
 }
 
 async function refreshAllFoliageTextures(){
@@ -1728,33 +2088,37 @@ modelJsonCache.set('template_seagrass', Promise.resolve(LOCAL_TEMPLATE_SEAGRASS_
 modelJsonCache.set('tall_seagrass_bottom', Promise.resolve(LOCAL_TALL_SEAGRASS_BOTTOM_MODEL));
 modelJsonCache.set('tall_seagrass_top', Promise.resolve(LOCAL_TALL_SEAGRASS_TOP_MODEL));
 
-async function getBlockTexture(texName){
+async function getBlockTexture(texName, opts){
   const key = String(texName || '').trim();
-  if (!key) return PLACEHOLDER_TEX;
+  if (!key) return placeholder;
+
+  const useMips = Boolean(opts && opts.useMips);
+  const cache = useMips ? textureCacheMipped : textureCacheNoMips;
+  const placeholder = useMips ? PLACEHOLDER_TEX_MIP : PLACEHOLDER_TEX_NO_MIP;
 
   // IMPORTANT: we may have *in-flight* loads.
   // Older code cached PLACEHOLDER_TEX immediately, which made any concurrent callers
   // permanently receive the placeholder (they would never await the real texture).
   // To fix this, we cache the *Promise* for the load. Awaiting a non-Promise value
   // still works, so callers can safely `await getBlockTexture(...)` either way.
-  if (textureCache.has(key)) return await textureCache.get(key);
+  if (cache.has(key)) return await cache.get(key);
 
   const url = blockTextureUrl(key);
   const p = (async () => {
     try {
       const t = await texLoader.loadAsync(url);
-      configureMcTexture(t);
+      configureMcTexture(t, { useMips });
       fixAnimatedStripTexture(t);
-      textureCache.set(key, t);
+      cache.set(key, t);
       return t;
     } catch (e) {
       console.warn('Failed to load texture', { key, url }, e);
-      textureCache.set(key, PLACEHOLDER_TEX);
+      cache.set(key, placeholder);
       return PLACEHOLDER_TEX;
     }
   })();
 
-  textureCache.set(key, p);
+  cache.set(key, p);
   return await p;
 }
 
@@ -2700,7 +3064,7 @@ function ensureCubeMats(){
   if (blockCubeMatCache.has(key)) return blockCubeMatCache.get(key);
 
   const base = new THREE.MeshBasicMaterial({
-    map: PLACEHOLDER_TEX,
+    map: PLACEHOLDER_TEX_MIP,
     color: 0xdddddd,
     opacity: grassOpacity,
     transparent: (grassOpacity < 1),
@@ -2734,8 +3098,8 @@ function ensureFoliageMats(id){
   const placementTintHex = useOverlayTint ? GRAYSCALE_FOLIAGE_OVERLAY_HEX : 0xd6d6d6;
 
   if (model === 'double') {
-    const baseBottom = makePlantMaterial(PLACEHOLDER_TEX);
-    const baseTop = makePlantMaterial(PLACEHOLDER_TEX);
+    const baseBottom = makePlantMaterial(PLACEHOLDER_TEX_NO_MIP);
+    const baseTop = makePlantMaterial(PLACEHOLDER_TEX_NO_MIP);
     baseBottom.color.setHex(baseTintHex);
     baseTop.color.setHex(baseTintHex);
 
@@ -2789,7 +3153,7 @@ function ensureFoliageMats(id){
   }
 
   // single
-  const base = makePlantMaterial(PLACEHOLDER_TEX);
+  const base = makePlantMaterial(PLACEHOLDER_TEX_NO_MIP);
   base.color.setHex(baseTintHex);
   const selected = base.clone();
   selected.color.setHex(0xdb8484);
@@ -3015,7 +3379,7 @@ function buildMinecraftModelGroup(model, material, { perFaceMaterials=false } = 
     perFaceMatCache.set(texName, m);
 
     (async () => {
-      const t = await getBlockTexture(texName);
+      const t = await getBlockTexture(texName, { useMips: true });
       m.map = t;
       m.needsUpdate = true;
       revealMaterialAfterLoad(m);

@@ -576,6 +576,15 @@ footer.disclaimer{
   transform: translateY(1px);
 }
 
+.canvas-topright .toggle select{
+  background: rgba(0,0,0,0.35);
+  color: rgba(255,255,255,0.9);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
 .canvas-topright .rp-controls{
   background: rgba(20,20,20,0.75);
   border: 1px solid rgba(255,255,255,0.12);

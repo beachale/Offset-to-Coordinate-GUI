@@ -56,7 +56,7 @@
             Overlay image (any size)
             <input id="overlayFile" type="file" accept="image/png,image/jpeg,image/bmp,.bmp" />
           </label>
-          <label>Overlay opacity <input id="overlayOpacity" type="range" min="0" max="1" step="0.01" value="0.65" /></label>
+          <label>Overlay opacity <input id="overlayOpacity" type="range" min="0" max="1" step="0.01" value="1" /></label>
           <label>Texture opacity <input id="grassOpacity" type="range" min="0" max="1" step="0.01" value="1" /></label>
           <label><input id="showOverlay" type="checkbox" checked /> Show overlay</label>
           <label><input id="showGrid" type="checkbox" checked /> Show grid</label>
@@ -204,6 +204,16 @@
           </div>
           <label class="toggle progart"><input id="progArtToggle" type="checkbox" /> Programmer Art</label>
           <label class="toggle msaa" title="Multisample anti-aliasing"><input id="msaaToggle" type="checkbox" checked /> MSAA</label>
+          <label class="toggle mipmaps" title="Minecraft-style mipmap chain + cutout alpha coverage. Higher = less shimmer but slightly softer textures.">
+            Mipmaps
+            <select id="mipLevels">
+              <option value="0" selected>0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </label>
         </div>
       <canvas id="view" width="960" height="540"></canvas>
       <div class="foliage-picker" title="Choose which texture type you are placing">
