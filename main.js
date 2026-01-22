@@ -2593,6 +2593,8 @@ function setTallSeagrassFrame(frame){
   tallSeagrassFrame = ((frame % n) + n) % n;
   updateSeagrassFrameLabel();
   applyTallSeagrassFrameToCachedMats();
+  // On-demand renderer: changing the animated frame must invalidate the view.
+  try { requestRender(); } catch (_) {}
 }
 
 function syncSeagrassFrameControls(){
@@ -2734,6 +2736,19 @@ syncSmallDripleafRotationControls();
 
 updateOffsetUiMode();
 
+// Safety net for render-on-demand: if any block-specific UI in the canvas changes,
+// make sure we schedule a redraw even if a specific handler forgets to.
+// (requestRender() is de-duped internally, so extra calls are cheap.)
+try {
+  const __foliagePicker = document.querySelector('.foliage-picker');
+  if (__foliagePicker) {
+    const __invalidate = () => { try { requestRender(); } catch (_) {} };
+    __foliagePicker.addEventListener('input', __invalidate);
+    __foliagePicker.addEventListener('change', __invalidate);
+    __foliagePicker.addEventListener('click', __invalidate);
+  }
+} catch (_) {}
+
 el.seagrassFramePrev?.addEventListener('click', () => {
   setTallSeagrassFrame(tallSeagrassFrame - 1);
 });
@@ -2760,6 +2775,8 @@ el.smallDripleafRotateBtn?.addEventListener('click', () => {
     applySmallDripleafTopRotation(placementPreview, smallDripleafPlacementRot);
   }
   syncSmallDripleafRotationControls();
+  // On-demand renderer: placement preview rotation must invalidate the view.
+  try { requestRender(); } catch (_) {}
 });
 
 
@@ -2777,6 +2794,8 @@ el.bambooUvU?.addEventListener('input', () => {
         const u = clampInt(g.variant.uvU ?? nextU, 0, 15);
         const v = clampInt(g.variant.uvV ?? bambooUvV, 0, 15);
         if (mat && mat.map) applyBambooUvToTexture(mat.map, u, v);
+        // On-demand renderer: material UV edits must invalidate the view.
+        try { requestRender(); } catch (_) {}
         return;
       }
     }
@@ -2786,6 +2805,7 @@ el.bambooUvU?.addEventListener('input', () => {
   bambooUvU = nextU;
   applyBambooUvToCachedMats();
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
+  try { requestRender(); } catch (_) {}
 });
 
 el.bambooUvV?.addEventListener('input', () => {
@@ -2802,6 +2822,8 @@ el.bambooUvV?.addEventListener('input', () => {
         const u = clampInt(g.variant.uvU ?? bambooUvU, 0, 15);
         const v = clampInt(g.variant.uvV ?? nextV, 0, 15);
         if (mat && mat.map) applyBambooUvToTexture(mat.map, u, v);
+        // On-demand renderer: material UV edits must invalidate the view.
+        try { requestRender(); } catch (_) {}
         return;
       }
     }
@@ -2811,6 +2833,7 @@ el.bambooUvV?.addEventListener('input', () => {
   bambooUvV = nextV;
   applyBambooUvToCachedMats();
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
+  try { requestRender(); } catch (_) {}
 });
 
 el.bambooModelSize?.addEventListener('change', () => {
@@ -2846,6 +2869,7 @@ el.bambooModelSize?.addEventListener('change', () => {
   }
 
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
+  try { requestRender(); } catch (_) {}
 });
 
 // Variant controls wiring
