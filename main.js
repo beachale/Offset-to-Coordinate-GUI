@@ -578,6 +578,9 @@ const el = {
   yaw: document.getElementById('yaw'),
   pitch: document.getElementById('pitch'),
   fov: document.getElementById('fov'),
+  rotate90CW: document.getElementById('rotate90CW'),
+  rotate90CCW: document.getElementById('rotate90CCW'),
+  rotateMsg: document.getElementById('rotateMsg'),
   oldCamNudge: document.getElementById('oldCamNudge'),
   reallyOldCamNudge: document.getElementById('reallyOldCamNudge'),
   readout: document.getElementById('readout'),
@@ -1252,7 +1255,113 @@ function syncCamYDisplayToMode() {
   el.camY.value = fmt(yDisplay);
 }
 
+function __wrapYawDeg(y){
+  // Keep yaw in (-180..180] like Minecraft does.
+  if (!Number.isFinite(y)) return 0;
+  y = ((y % 360) + 360) % 360;
+  if (y > 180) y -= 360;
+  return y;
+}
+
+function __setRotateMsg(text, isError=false){
+  if (!el.rotateMsg) return;
+  el.rotateMsg.textContent = String(text ?? '');
+  el.rotateMsg.classList.toggle('tp-error', Boolean(isError));
+}
+
+function __rotateXZ90About(x, z, px, pz, dir){
+  const dx = x - px;
+  const dz = z - pz;
+  // dir=+1: yaw+90 (CW button) -> position rotation that keeps view identical.
+  // dir=-1: yaw-90 (CCW button)
+  if (dir >= 0) return { x: px - dz, z: pz + dx };
+  return { x: px + dz, z: pz - dx };
+}
+
+function __rotateCameraAndOffsets90(dir=+1){
+  try {
+    const centerXZ = Boolean(el.centerTpXZ?.checked);
+    const x0 = parseMcTpAxis(el.camX?.value, 'x', 0, centerXZ);
+    const z0 = parseMcTpAxis(el.camZ?.value, 'z', 0, centerXZ);
+    const yaw0 = num(el.yaw?.value, 0);
+
+    // Rotate around the *center of the block the camera is currently in*.
+    // This keeps block coordinates integral after rotation and matches Minecraft's mental model.
+    const px = Math.floor(x0) + 0.5;
+    const pz = Math.floor(z0) + 0.5;
+
+    const camR = __rotateXZ90About(x0, z0, px, pz, dir);
+    const yaw1 = __wrapYawDeg(yaw0 + (dir >= 0 ? 90 : -90));
+
+    // Update camera inputs with high precision and avoid vanilla integer-centering quirks.
+    if (el.camX) el.camX.value = __formatTpToken(camR.x, 'x');
+    if (el.camZ) el.camZ.value = __formatTpToken(camR.z, 'z');
+    if (el.yaw)  el.yaw.value  = __formatAngle(yaw1);
+
+    // Rotate all placed textures so the on-screen view stays identical.
+    // NOTE: grasses/occupiedByBlock are declared later in the file, but exist by the time the user clicks.
+    if (typeof grasses !== 'undefined' && grasses && grasses.values) {
+      try { occupiedByBlock?.clear?.(); } catch (_) {}
+
+      for (const g of grasses.values()) {
+        if (!g || !g.block || !g.off) continue;
+
+        // Rotate the *block center* so the result stays on the integer block grid.
+        const bcx = (g.block.x + 0.5);
+        const bcz = (g.block.z + 0.5);
+        const br = __rotateXZ90About(bcx, bcz, px, pz, dir);
+        const bx2 = Math.floor(br.x);
+        const bz2 = Math.floor(br.z);
+        g.block.x = bx2;
+        g.block.z = bz2;
+
+        // Rotate the 0..15 offset nibbles. Horizontal axes swap; one axis flips.
+        const ox = clampInt(Math.floor(g.off.x), 0, 15);
+        const oz = clampInt(Math.floor(g.off.z), 0, 15);
+        if (dir >= 0) {
+          g.off.x = 15 - oz;
+          g.off.z = ox;
+        } else {
+          g.off.x = oz;
+          g.off.z = 15 - ox;
+        }
+
+        // Oriented foliage: keep orientation consistent in the rotated coordinate system.
+        if (g.kind === 'SMALL_DRIPLEAF') {
+          const r0 = clampRotSteps4(g.variant?.rot ?? 0);
+          const step = (dir >= 0) ? 1 : 3; // -1 mod 4
+          const r1 = (r0 + step) % 4;
+          g.variant = g.variant || {};
+          g.variant.rot = r1;
+          try { applySmallDripleafTopRotation(g.mesh, r1); } catch (_) {}
+        }
+
+        try { updateGrassMeshTransform(g); } catch (_) {}
+
+        try {
+          const k = keyForBlock(g.block);
+          occupiedByBlock?.set?.(k, g.id);
+        } catch (_) {}
+      }
+
+      try { refreshGrassList(); } catch (_) {}
+    }
+
+    updateCameraFromUI();
+
+    const dirLabel = (dir >= 0) ? 'CW (+90 yaw)' : 'CCW (-90 yaw)';
+    __setRotateMsg(`Rotated ${dirLabel} around block (${Math.floor(x0)}, ${Math.floor(z0)}).`, false);
+  } catch (e) {
+    console.error(e);
+    __setRotateMsg(String(e?.message || e), true);
+  }
+}
+
+
 // /tp UI wiring
+el.rotate90CW?.addEventListener('click', () => __rotateCameraAndOffsets90(+1));
+el.rotate90CCW?.addEventListener('click', () => __rotateCameraAndOffsets90(-1));
+
 el.tpGo?.addEventListener('click', teleportFromTpInput);
 el.tpInput?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {

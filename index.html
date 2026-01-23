@@ -37,6 +37,12 @@
           <label>FOV <input id="fov" type="number" step="0.1" value="70" /></label>
         </div>
 
+        <div class="row">
+          <button id="rotate90CW" type="button" title="Rotate camera + all placed textures 90° clockwise around your current block center. Keeps the overlay view identical (fixes north/east mistakes).">Rotate 90° CW</button>
+          <button id="rotate90CCW" type="button" title="Rotate camera + all placed textures 90° counter-clockwise around your current block center.">Rotate 90° CCW</button>
+          <span id="rotateMsg" class="hint" aria-live="polite"></span>
+        </div>
+
         <div class="row fov-nudge">
           <div class="fov-warning">Use nudge toggle if using an old Minecraft screenshot with in-game F3 coords to account for camera nudge</div>
           <label class="toggle"><input id="oldCamNudge" type="checkbox" /> Old Minecraft camera nudge (+0.05)</label>
