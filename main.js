@@ -43,6 +43,10 @@ const PROGRAMMER_ART_URLS = Object.freeze({
 
   // Tall flowers
   sunflower_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'sunflower_top.png',
+  // Sunflower top model uses multiple textures (front/back/top).
+  // Swap these too so the whole head changes when Programmer Art is enabled.
+  sunflower_front: PROGRAMMER_ART_BLOCK_TEX_BASE + 'sunflower_front.png',
+  sunflower_back: PROGRAMMER_ART_BLOCK_TEX_BASE + 'sunflower_back.png',
   sunflower_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'sunflower_bottom.png',
   lilac_top: PROGRAMMER_ART_BLOCK_TEX_BASE + 'lilac_top.png',
   lilac_bottom: PROGRAMMER_ART_BLOCK_TEX_BASE + 'lilac_bottom.png',
@@ -2074,6 +2078,41 @@ async function refreshAllFoliageTextures(){
       })());
     }
   }
+
+  // Also refresh any per-face materials created by buildMinecraftModelGroup() (MultiMaterial).
+  // This is required for models like sunflower_top (and others) that don't use the simple
+  // single/double cross-material pipeline, otherwise only the stalk textures would update.
+  try {
+    const seen = new Set();
+    const roots = [];
+    // Prefer known scene roots if they exist.
+    try { if (typeof grassGroup !== 'undefined' && grassGroup) roots.push(grassGroup); } catch (_) {}
+    try { if (typeof placementPreview !== 'undefined' && placementPreview) roots.push(placementPreview); } catch (_) {}
+    // Fallback: scan the whole scene.
+    if (!roots.length) {
+      try { if (typeof scene !== 'undefined' && scene) roots.push(scene); } catch (_) {}
+    }
+
+    for (const r of roots) {
+      r.traverse(obj => {
+        if (!obj || !obj.isMesh) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          const texName = m?.userData?.__mcTexName;
+          if (!texName || seen.has(m)) continue;
+          seen.add(m);
+          jobs.push((async () => {
+            const t = await getBlockTexture(texName, { useMips: true });
+            m.map = t;
+            m.needsUpdate = true;
+          })());
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[Texture Pack] Failed to refresh per-face materials', e);
+  }
+
   await Promise.all(jobs);
   // Re-apply manual animated frame selection (tall seagrass).
   applyTallSeagrassFrameToCachedMats();

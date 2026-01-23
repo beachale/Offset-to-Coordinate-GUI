@@ -386,6 +386,25 @@ code{
 }
 .repos a:hover{ background: rgba(143,227,255,0.10); }
 
+/* Mojang/Microsoft disclaimer (bottom-right, subtle) */
+.repos__disclaimer{
+  margin-left: auto;
+  padding-left: 12px;
+  max-width: 440px;
+  min-width: 0; /* allow shrinking inside flex */
+  font-size: 10px;
+  line-height: 1.15;
+  max-height: 24px; /* ~2 lines; keeps the footer compact even without line-clamp support */
+  letter-spacing: 0.2px;
+  color: rgba(255,255,255,0.55);
+  text-align: right;
+  /* keep it compact */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
 /* Bottom-right credit / GitHub link */
 .gpt-credit{
   position: fixed;
