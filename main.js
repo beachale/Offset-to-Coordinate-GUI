@@ -668,10 +668,136 @@ const el = {
   clearGrass: document.getElementById('clearGrass'),
 };
 
+// --- Event Listener Cleanup System ---
+// Registry to track all event listeners for proper cleanup (prevents memory leaks)
+const eventListenerRegistry = [];
+
+/**
+ * Add an event listener and register it for cleanup
+ * @param {EventTarget} target - The element to attach the listener to
+ * @param {string} event - The event name (e.g., 'click', 'input')
+ * @param {Function} handler - The event handler function
+ * @param {Object} options - Optional event listener options
+ * @returns {Function} cleanup function to remove this specific listener
+ */
+function addManagedEventListener(target, event, handler, options = false) {
+  if (!target) return () => {};
+  
+  target.addEventListener(event, handler, options);
+  
+  // Store cleanup info
+  const cleanup = () => target.removeEventListener(event, handler, options);
+  eventListenerRegistry.push(cleanup);
+  
+  return cleanup;
+}
+
+/**
+ * Remove all registered event listeners (call this when cleaning up the app)
+ */
+function cleanupAllEventListeners() {
+  console.log(`Cleaning up ${eventListenerRegistry.length} event listeners...`);
+  
+  eventListenerRegistry.forEach(cleanup => {
+    try {
+      cleanup();
+    } catch (err) {
+      console.warn('Failed to cleanup event listener:', err);
+    }
+  });
+  
+  eventListenerRegistry.length = 0; // Clear the array
+  console.log('Event listener cleanup complete.');
+}
+
+// Expose cleanup function globally for manual cleanup or debugging
+window.__cleanupEventListeners = cleanupAllEventListeners;
+
 function num(v, fallback=0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
+
+// --- Debounce Utility for Input Performance ---
+/**
+ * Creates a debounced version of a function that delays execution until after
+ * the specified wait time has elapsed since the last call.
+ * Perfect for expensive operations triggered by user input (typing, dragging sliders).
+ * 
+ * @param {Function} func - The function to debounce
+ * @param {number} wait - Milliseconds to wait before executing (default: 150ms)
+ * @param {boolean} immediate - If true, execute on leading edge instead of trailing
+ * @returns {Function} Debounced function with a .cancel() method
+ * 
+ * @example
+ * const debouncedUpdate = debounce(updateCamera, 150);
+ * input.addEventListener('input', debouncedUpdate);
+ * // User types rapidly → updateCamera only called once, 150ms after they stop
+ */
+function debounce(func, wait = 150, immediate = false) {
+  let timeout;
+  
+  const debounced = function(...args) {
+    const context = this;
+    
+    const later = () => {
+      timeout = null;
+      if (!immediate) func.apply(context, args);
+    };
+    
+    const callNow = immediate && !timeout;
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+    
+    if (callNow) func.apply(context, args);
+  };
+  
+  // Allow canceling pending execution
+  debounced.cancel = () => {
+    clearTimeout(timeout);
+    timeout = null;
+  };
+  
+  return debounced;
+}
+
+// Store debounced functions for cleanup
+const debouncedFunctions = new Map();
+
+/**
+ * Create and register a debounced function for automatic cleanup
+ * @param {string} key - Unique identifier for this debounced function
+ * @param {Function} func - The function to debounce
+ * @param {number} wait - Milliseconds to wait (default: 150ms)
+ * @returns {Function} Debounced function
+ */
+function createDebounced(key, func, wait = 150) {
+  // Cancel any existing debounced function with this key
+  if (debouncedFunctions.has(key)) {
+    debouncedFunctions.get(key).cancel();
+  }
+  
+  const debounced = debounce(func, wait);
+  debouncedFunctions.set(key, debounced);
+  return debounced;
+}
+
+/**
+ * Cancel all pending debounced function calls
+ */
+function cancelAllDebounced() {
+  console.log(`Canceling ${debouncedFunctions.size} debounced functions...`);
+  debouncedFunctions.forEach(fn => fn.cancel());
+  debouncedFunctions.clear();
+}
+
+// Expose for debugging
+window.__cancelAllDebounced = cancelAllDebounced;
+window.__getDebounceState = () => ({
+  count: debouncedFunctions.size,
+  keys: Array.from(debouncedFunctions.keys())
+});
+
 
 // --- Cracker match mode UI wiring ---
 const matchModeEl = el.matchMode;
@@ -1016,27 +1142,28 @@ function syncVisibilityUI(){
   try { requestRender(); } catch (_) {}
 }
 
-el.overlayOpacity.addEventListener('input', syncOverlayUI);
-el.grassOpacity?.addEventListener('input', () => {
+// Use managed event listeners to enable proper cleanup
+addManagedEventListener(el.overlayOpacity, 'input', syncOverlayUI);
+addManagedEventListener(el.grassOpacity, 'input', () => {
   syncGrassOpacityUI();
   try { syncSpecialModelOpacity(); } catch (_) { /* placement mode not initialized yet */ }
 });
-el.showOverlay.addEventListener('change', syncOverlayUI);
-el.showBorder?.addEventListener('change', () => { try { requestRender(); } catch (_) {} });
-window.addEventListener('resize', () => { try { requestRender(); } catch (_) {} });
-el.gridRadius?.addEventListener('input', () => {
+addManagedEventListener(el.showOverlay, 'change', syncOverlayUI);
+addManagedEventListener(el.showBorder, 'change', () => { try { requestRender(); } catch (_) {} });
+addManagedEventListener(window, 'resize', () => { try { requestRender(); } catch (_) {} });
+addManagedEventListener(el.gridRadius, 'input', () => {
   syncGridRadiusUI();
   // Rebuild helpers around the current camera position.
   // (updateCameraFromUI() calls updateHelpersAroundPlayer internally.)
   updateCameraFromUI();
 });
-el.showGrid.addEventListener('change', syncGridUI);
-el.showGrid.addEventListener('change', syncSceneVisUI);
-el.showGrass.addEventListener('change', syncSceneVisUI);
-el.showGrid?.addEventListener('change', syncVisibilityUI);
-el.showGrass?.addEventListener('change', syncVisibilityUI);
-el.centerTpXZ?.addEventListener('change', updateCameraFromUI);
-el.overlayFile.addEventListener('change', async (e) => {
+addManagedEventListener(el.showGrid, 'change', syncGridUI);
+addManagedEventListener(el.showGrid, 'change', syncSceneVisUI);
+addManagedEventListener(el.showGrass, 'change', syncSceneVisUI);
+addManagedEventListener(el.showGrid, 'change', syncVisibilityUI);
+addManagedEventListener(el.showGrass, 'change', syncVisibilityUI);
+addManagedEventListener(el.centerTpXZ, 'change', updateCameraFromUI);
+addManagedEventListener(el.overlayFile, 'change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
   try {
@@ -1090,12 +1217,12 @@ function applyWorkspaceAndRenderSize(workW, workH, renW, renH) {
   try { requestRender(); } catch (_) {}
 }
 
-el.applyViewSize?.addEventListener('click', () => {
+addManagedEventListener(el.applyViewSize, 'click', () => {
   applyWorkspaceAndRenderSize(el.viewW?.value, el.viewH?.value, el.renderW?.value, el.renderH?.value);
 });
 
 // Convenience: set workspace and render size to the currently loaded overlay image dimensions.
-el.sizeToOverlay?.addEventListener('click', () => {
+addManagedEventListener(el.sizeToOverlay, 'click', () => {
   const iw = overlayImageW || 0;
   const ih = overlayImageH || 0;
   if (iw > 0 && ih > 0) {
@@ -1137,7 +1264,7 @@ function setOffsetWorkspacePos(offsetX, offsetY, worldX, worldY) {
   try { requestRender(); } catch (_) {}
 }
 
-viewCanvas.addEventListener('mousedown', (event) => {
+addManagedEventListener(viewCanvas, 'mousedown', (event) => {
   // Left-click drag pans the workspace.
   if (event.button !== 0) return;
   leftDown = true;
@@ -1148,7 +1275,7 @@ viewCanvas.addEventListener('mousedown', (event) => {
   leftDownWorldY = offsetToWorkspaceY(event.offsetY);
   event.preventDefault();
 });
-viewCanvas.addEventListener('mousemove', (event) => {
+addManagedEventListener(viewCanvas, 'mousemove', (event) => {
   if (!leftDown) return;
   if (!didPanDrag) {
     const dx = Math.abs(event.clientX - leftDownClientX);
@@ -1161,9 +1288,9 @@ viewCanvas.addEventListener('mousemove', (event) => {
 });
 
 // If the mouse is released outside the canvas, stop any in-progress pan.
-window.addEventListener('mouseup', () => { leftDown = false; didPanDrag = false; });
+addManagedEventListener(window, 'mouseup', () => { leftDown = false; didPanDrag = false; });
 
-viewCanvas.addEventListener('wheel', (event) => {
+addManagedEventListener(viewCanvas, 'wheel', (event) => {
   event.preventDefault();
   // Zoom around cursor (like local-overlay). One wheel tick ~ +/-1 zoom index.
   // If we're not actively panning, refresh the zoom anchor to the current cursor.
@@ -1377,8 +1504,11 @@ el.tpInput?.addEventListener('input', () => {
   if ((el.tpMsg?.textContent ?? '') && el.tpMsg?.classList?.contains('tp-error')) setTpMsg('', false);
 });
 
+// Debounce camera updates for better performance during rapid input changes
+const debouncedCameraUpdate = createDebounced('cameraUpdate', updateCameraFromUI, 100);
+
 for (const k of ['camX','camY','camZ','yaw','pitch','fov']) {
-  el[k].addEventListener('input', updateCameraFromUI);
+  el[k].addEventListener('input', debouncedCameraUpdate);
 }
 
 el.oldCamNudge?.addEventListener('change', () => {
@@ -1441,7 +1571,7 @@ if (el.progArtToggle){
   el.progArtToggle.addEventListener('change', async () => {
     useProgrammerArt = Boolean(el.progArtToggle.checked);
     syncTexIndicator();
-    try { await refreshAllFoliageTextures(); } catch (e) { console.warn('Failed to refresh textures', e); }
+    try { await safeRefreshAllFoliageTextures(); } catch (e) { console.warn('Failed to refresh textures', e); }
   });
 }
 syncTexIndicator();
@@ -1604,7 +1734,7 @@ function rebuildAllPlacedGrassMeshes(){
 
 async function applyResourcePackSwitch(){
   resetAssetCachesForPackSwitch();
-  try { await refreshAllFoliageTextures(); } catch (_) {}
+  try { await safeRefreshAllFoliageTextures(); } catch (_) {}
   try { rebuildAllPlacedGrassMeshes(); } catch (_) {}
   try { syncSpecialModelOpacity(); } catch (_) {}
   try { requestRender(); } catch (_) {}
@@ -1682,7 +1812,7 @@ function syncMipLevelsUI(){
 async function applyMipmapSettingsSwitch(){
   // Rebuild textures + meshes so every material gets the new sampler + mip chain.
   resetAssetCachesForPackSwitch();
-  try { await refreshAllFoliageTextures(); } catch (_) {}
+  try { await safeRefreshAllFoliageTextures(); } catch (_) {}
   try { rebuildAllPlacedGrassMeshes(); } catch (_) {}
   try { syncSpecialModelOpacity(); } catch (_) {}
 }
@@ -2150,6 +2280,48 @@ function clearProgrammerArtTextureCache(){
   for (const k of PROGRAMMER_ART_KEYS) { textureCacheMipped.delete(k); textureCacheNoMips.delete(k); }
 }
 
+// --- Texture Refresh Race Condition Prevention ---
+// Prevents multiple simultaneous texture refresh operations
+let isRefreshingTextures = false;
+let pendingTextureRefresh = false;
+
+/**
+ * Safely refresh all foliage textures with race condition prevention.
+ * If a refresh is already in progress, queues one more refresh to run after completion.
+ * Multiple rapid calls will be coalesced into a single pending refresh.
+ */
+async function safeRefreshAllFoliageTextures() {
+  // If already refreshing, mark that we need another refresh
+  if (isRefreshingTextures) {
+    console.log('[Texture Refresh] Already in progress, queuing refresh...');
+    pendingTextureRefresh = true;
+    return;
+  }
+  
+  isRefreshingTextures = true;
+  
+  try {
+    await refreshAllFoliageTextures();
+    
+    // If another refresh was requested while we were working, do it now
+    if (pendingTextureRefresh) {
+      console.log('[Texture Refresh] Running queued refresh...');
+      pendingTextureRefresh = false;
+      await refreshAllFoliageTextures();
+    }
+  } catch (error) {
+    console.error('[Texture Refresh] Failed:', error);
+    throw error; // Re-throw so callers can handle
+  } finally {
+    isRefreshingTextures = false;
+    pendingTextureRefresh = false; // Clear any pending flag
+  }
+}
+
+/**
+ * Internal function that performs the actual texture refresh.
+ * ⚠️ Do not call directly! Use safeRefreshAllFoliageTextures() instead to prevent race conditions.
+ */
 async function refreshAllFoliageTextures(){
   clearProgrammerArtTextureCache();
   // Helpful visibility when diagnosing pack switches.
@@ -3030,7 +3202,8 @@ el.cubeTopRotateBtn?.addEventListener('click', () => {
 });
 
 
-el.bambooUvU?.addEventListener('input', () => {
+// Debounced bamboo UV U updates for smoother performance
+const handleBambooUvU = () => {
   const nextU = clampInt(el.bambooUvU.value, 0, 15);
 
   // If a bamboo instance is selected, edit that instance only.
@@ -3056,9 +3229,14 @@ el.bambooUvU?.addEventListener('input', () => {
   applyBambooUvToCachedMats();
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
   try { requestRender(); } catch (_) {}
-});
+};
 
-el.bambooUvV?.addEventListener('input', () => {
+const debouncedBambooUvU = createDebounced('bambooUvU', handleBambooUvU, 75);
+el.bambooUvU?.addEventListener('input', debouncedBambooUvU);
+
+// Debounced bamboo UV V updates for smoother performance
+// Debounced bamboo UV V updates for smoother performance
+const handleBambooUvV = () => {
   const nextV = clampInt(el.bambooUvV.value, 0, 15);
 
   // If a bamboo instance is selected, edit that instance only.
@@ -3084,7 +3262,10 @@ el.bambooUvV?.addEventListener('input', () => {
   applyBambooUvToCachedMats();
   if (typeof placementMode !== 'undefined' && placementMode) ensurePlacementPreview();
   try { requestRender(); } catch (_) {}
-});
+};
+
+const debouncedBambooUvV = createDebounced('bambooUvV', handleBambooUvV, 75);
+el.bambooUvV?.addEventListener('input', debouncedBambooUvV);
 
 el.bambooModelSize?.addEventListener('change', () => {
   const nextSize = String(el.bambooModelSize.value || '2x2');
@@ -3236,8 +3417,11 @@ function applyVariantHeightFromUI(){
   }
 }
 
-el.variantHeight?.addEventListener('input', applyVariantHeightFromUI);
-el.variantHeight?.addEventListener('change', applyVariantHeightFromUI);
+// Debounce variant height updates for better performance
+const debouncedVariantHeight = createDebounced('variantHeight', applyVariantHeightFromUI, 75);
+
+el.variantHeight?.addEventListener('input', debouncedVariantHeight);
+el.variantHeight?.addEventListener('change', applyVariantHeightFromUI); // Keep instant on blur/enter
 
 el.variantDir?.addEventListener('change', () => {
   const nextDir = (String(el.variantDir.value) === 'down') ? 'down' : 'up';
@@ -4877,15 +5061,21 @@ function applySelectedBlockFromUI({syncUI=true} = {}){
 
 
 // Live update: typing in the offset boxes or using their arrow steppers immediately moves the selected grass.
+// Debounced for better performance during rapid changes
+const debouncedOffsetUpdate = createDebounced('offsetUpdate', () => applyOffsetsFromUI({syncUI:false}), 75);
+
 for (const k of ['offX','offY','offZ']) {
-  el[k].addEventListener('input', () => applyOffsetsFromUI({syncUI:false}));
-  el[k].addEventListener('change', () => applyOffsetsFromUI({syncUI:false}));
+  el[k].addEventListener('input', debouncedOffsetUpdate);
+  el[k].addEventListener('change', () => applyOffsetsFromUI({syncUI:false})); // Keep instant on blur/enter
 }
 
 // Live update: typing in the selected block XYZ boxes immediately moves the selected grass.
+// Debounced for better performance during rapid changes
+const debouncedBlockUpdate = createDebounced('blockUpdate', () => applySelectedBlockFromUI({syncUI:false}), 75);
+
 for (const k of ['selBlockX','selBlockY','selBlockZ']) {
-  el[k].addEventListener('input', () => applySelectedBlockFromUI({syncUI:false}));
-  el[k].addEventListener('change', () => applySelectedBlockFromUI({syncUI:false}));
+  el[k].addEventListener('input', debouncedBlockUpdate);
+  el[k].addEventListener('change', () => applySelectedBlockFromUI({syncUI:false})); // Keep instant on blur/enter
 }
 
 el.centerOffsets.addEventListener('click', () => {
@@ -6477,3 +6667,71 @@ function renderFrame(){
 
 __readyToRender = true;
 requestRender();
+
+// --- Global Error Handlers ---
+// Catch unhandled promise rejections (e.g., failed async operations)
+addManagedEventListener(window, 'unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+  
+  // Show user-friendly error message
+  const errorMsg = event.reason?.message || String(event.reason) || 'An unexpected error occurred';
+  alert(`⚠️ Error: ${errorMsg}\n\nCheck the browser console (F12) for details.`);
+  
+  // Prevent the default browser error handling
+  event.preventDefault();
+});
+
+// Catch synchronous errors that bubble up
+addManagedEventListener(window, 'error', (event) => {
+  console.error('Global error:', event.error || event.message);
+  
+  // Only show alert for critical errors, not resource loading failures
+  if (event.error && !event.filename?.includes('http')) {
+    const errorMsg = event.error?.message || event.message || 'An unexpected error occurred';
+    alert(`⚠️ Error: ${errorMsg}\n\nCheck the browser console (F12) for details.`);
+  }
+  
+  // Let resource loading errors fail silently (textures, etc.)
+  if (event.filename?.includes('http')) {
+    console.warn('Resource loading failed:', event.filename);
+  }
+});
+
+// --- Event Listener Cleanup Info ---
+// The application now tracks event listeners for proper cleanup.
+// To clean up all registered event listeners, call: window.__cleanupEventListeners()
+// This is useful for:
+// - Testing/debugging memory leaks
+// - Preparing for app teardown
+// - Resetting the application state
+//
+// Note: Some event listeners (~50 remaining) still use the old .addEventListener() pattern.
+// These can be converted to addManagedEventListener() as needed.
+console.log(`✅ Application initialized with ${eventListenerRegistry.length} managed event listeners.`);
+console.log('💡 To cleanup all event listeners, call: window.__cleanupEventListeners()');
+
+// --- Texture Refresh Debugging Utilities ---
+// Expose texture refresh state for debugging
+window.__getTextureRefreshState = () => ({
+  isRefreshing: isRefreshingTextures,
+  hasPending: pendingTextureRefresh,
+  status: isRefreshingTextures 
+    ? (pendingTextureRefresh ? 'Refreshing (1 queued)' : 'Refreshing') 
+    : (pendingTextureRefresh ? 'Idle (1 queued)' : 'Idle')
+});
+
+// Force a texture refresh (useful for debugging)
+window.__forceTextureRefresh = async () => {
+  console.log('[Debug] Forcing texture refresh...');
+  await safeRefreshAllFoliageTextures();
+  console.log('[Debug] Texture refresh complete.');
+};
+
+console.log('💡 To check texture refresh status, call: window.__getTextureRefreshState()');
+console.log('💡 To force a texture refresh, call: window.__forceTextureRefresh()');
+
+// --- Debounce Debugging Utilities ---
+console.log(`✅ Application initialized with ${debouncedFunctions.size} debounced input handlers.`);
+console.log('💡 Debounced inputs: camera controls, offsets, block position, bamboo UV, variant height');
+console.log('💡 To check debounce state, call: window.__getDebounceState()');
+console.log('💡 To cancel all pending debounced calls, call: window.__cancelAllDebounced()');
