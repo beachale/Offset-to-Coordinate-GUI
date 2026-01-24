@@ -628,6 +628,9 @@ const el = {
   propaguleModel: document.getElementById('propaguleModel'),
   cubeControls: document.getElementById('cubeControls'),
   cubeBlockType: document.getElementById('cubeBlockType'),
+  cubeTopRotationControls: document.getElementById('cubeTopRotationControls'),
+  cubeTopRotateBtn: document.getElementById('cubeTopRotateBtn'),
+  cubeTopRotLabel: document.getElementById('cubeTopRotLabel'),
   seagrassFrameControls: document.getElementById('seagrassFrameControls'),
   seagrassFramePrev: document.getElementById('seagrassFramePrev'),
   seagrassFrameNext: document.getElementById('seagrassFrameNext'),
@@ -1537,7 +1540,7 @@ function rebuildAllPlacedGrassMeshes(){
       if (kind === 'CUBE') {
         const cmats = ensureCubeMats();
         const t = String(g.cubeType || 'GRASS_BLOCK');
-        const modelName = ensureCubeModelRegistered(t);
+        const modelName = ensureCubeModelRegistered(t, g.cubeTopRot ?? 0);
         mesh = makeAsyncMinecraftModelMesh(modelName, cmats.base, { perFaceMaterials: true });
       } else if (kind === 'BAMBOO') {
         const mats = ensureFoliageMats(kind);
@@ -2385,15 +2388,22 @@ const CUBE_BLOCK_TYPES = Object.freeze([
 const CUBE_BLOCK_TYPE_BY_TOKEN = new Map(CUBE_BLOCK_TYPES.map(t => [t.token, t]));
 let activeCubeBlockType = 'GRASS_BLOCK';
 
-function cubeBlockTypeToModelName(token){
+// Cube top-face UV rotation (0,90,180,270) stored as steps 0..3.
+// This is purely visual and does not affect exported offset datasets.
+let cubeTopPlacementRot = 0;
+
+function cubeBlockTypeToModelName(token, topRotSteps = 0){
   const t = String(token || '').toUpperCase();
-  return `cube_${t.toLowerCase()}`;
+  const base = `cube_${t.toLowerCase()}`;
+  const steps = clampRotSteps4(topRotSteps);
+  return steps ? `${base}_u${steps * 90}` : base;
 }
 
-function ensureCubeModelRegistered(token){
+function ensureCubeModelRegistered(token, topRotSteps = 0){
   const t = String(token || '').toUpperCase();
   const def = CUBE_BLOCK_TYPE_BY_TOKEN.get(t) || CUBE_BLOCK_TYPE_BY_TOKEN.get('GRASS_BLOCK');
-  const modelName = cubeBlockTypeToModelName(def.token);
+  const steps = clampRotSteps4(topRotSteps);
+  const modelName = cubeBlockTypeToModelName(def.token, steps);
   if (modelJsonCache.has(modelName)) return modelName;
 
   const p = (async () => {
@@ -2415,6 +2425,15 @@ function ensureCubeModelRegistered(token){
       west: tex.west || tex.side || all,
       east: tex.east || tex.side || all,
     });
+
+    // Apply optional UV rotation to the top face only.
+    const rotDeg = steps * 90;
+    if (Array.isArray(m.elements)) {
+      for (const elmt of m.elements) {
+        const up = elmt?.faces?.up;
+        if (up) up.rotation = rotDeg;
+      }
+    }
 
     return m;
   })();
@@ -2712,6 +2731,15 @@ function syncCubeControls(){
   if (el.cubeBlockType) el.cubeBlockType.value = String(activeCubeBlockType || 'GRASS_BLOCK').toUpperCase();
 }
 
+function syncCubeTopRotationControls(){
+  const box = el.cubeTopRotationControls;
+  if (!box) return;
+  const show = foliageSupportsCubeBlockType(activeFoliageId);
+  box.classList.toggle('hidden', !show);
+  if (!show) return;
+  if (el.cubeTopRotLabel) el.cubeTopRotLabel.textContent = `${clampRotSteps4(cubeTopPlacementRot) * 90}°`;
+}
+
 // Tall seagrass has an animated texture strip (19 frames).
 // The GUI defaults to frame 0, but allows manual stepping when tall seagrass is selected.
 const TALL_SEAGRASS_FRAME_COUNT = 19;
@@ -2792,6 +2820,56 @@ function getSelectedSmallDripleaf(){
   return null;
 }
 
+function getSelectedCube(){
+  try {
+    if (selectedId == null) return null;
+    const g = grasses.get(selectedId);
+    if (g && g.kind === 'CUBE') return g;
+  } catch (_) {}
+  return null;
+}
+
+function disposeCubePerFaceMaterials(root){
+  // Per-face materials are cloned on the fly; dispose only those, not the shared base material.
+  try {
+    root?.traverse?.(obj => {
+      if (!obj?.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of mats) {
+        if (m && m.userData && m.userData.__mcTexName) {
+          try { m.dispose?.(); } catch (_) {}
+        }
+      }
+    });
+  } catch (_) {}
+}
+
+function rebuildCubeInstance(g){
+  if (!g || g.kind !== 'CUBE') return;
+
+  // Normalize state.
+  const ct = String(g.cubeType || activeCubeBlockType || 'GRASS_BLOCK').toUpperCase();
+  g.cubeType = CUBE_BLOCK_TYPE_BY_TOKEN.has(ct) ? ct : 'GRASS_BLOCK';
+  g.cubeTopRot = clampRotSteps4(g.cubeTopRot ?? 0);
+
+  const old = g.mesh;
+  const cmats = ensureCubeMats();
+  const modelName = ensureCubeModelRegistered(g.cubeType, g.cubeTopRot);
+  const newMesh = makeAsyncMinecraftModelMesh(modelName, cmats.base, { perFaceMaterials: true });
+  newMesh.userData.__grassId = g.id;
+
+  grassGroup.remove(old);
+  grassGroup.add(newMesh);
+  g.mesh = newMesh;
+
+  // Best-effort dispose old geometry/materials.
+  try { old?.traverse?.(obj => { if (obj.isMesh && obj.geometry) obj.geometry.dispose?.(); }); } catch (_) {}
+  disposeCubePerFaceMaterials(old);
+
+  updateGrassMeshTransform(g);
+  try { requestRender(); } catch (_) {}
+}
+
 function syncSmallDripleafRotationControls(){
   const box = el.smallDripleafRotationControls;
   if (!box) return;
@@ -2857,6 +2935,7 @@ function setPlacementFoliage(id){
   showHideBambooUvControls();
   syncPropaguleControls();
   syncCubeControls();
+  syncCubeTopRotationControls();
   syncSeagrassFrameControls();
   syncSmallDripleafRotationControls();
   updateOffsetUiMode(activeFoliageId);
@@ -2879,6 +2958,7 @@ syncVariantControls();
 showHideBambooUvControls();
 syncBambooUvUI();
 syncCubeControls();
+syncCubeTopRotationControls();
 syncSeagrassFrameControls();
 syncSmallDripleafRotationControls();
 
@@ -2924,6 +3004,28 @@ el.smallDripleafRotateBtn?.addEventListener('click', () => {
   }
   syncSmallDripleafRotationControls();
   // On-demand renderer: placement preview rotation must invalidate the view.
+  try { requestRender(); } catch (_) {}
+});
+
+el.cubeTopRotateBtn?.addEventListener('click', () => {
+  // If a cube instance is selected, rotate that cube's top-face texture.
+  const sel = getSelectedCube();
+  if (sel) {
+    sel.cubeTopRot = clampRotSteps4((sel.cubeTopRot ?? cubeTopPlacementRot) + 1);
+    cubeTopPlacementRot = sel.cubeTopRot;
+    rebuildCubeInstance(sel);
+    // Ensure the UI + selection tint stays in sync once the async mesh loads.
+    setSelected(sel.id);
+    return;
+  }
+
+  // Otherwise rotate the placement default / placement preview (if active).
+  cubeTopPlacementRot = clampRotSteps4(cubeTopPlacementRot + 1);
+  if (typeof placementMode !== 'undefined' && placementMode) {
+    // This invalidates the previewKey, forcing a rebuild with the new UV rotation.
+    ensurePlacementPreview();
+  }
+  syncCubeTopRotationControls();
   try { requestRender(); } catch (_) {}
 });
 
@@ -3063,6 +3165,7 @@ el.propaguleModel?.addEventListener('change', () => {
 
 
 syncCubeControls();
+syncCubeTopRotationControls();
 
 el.cubeBlockType?.addEventListener('change', () => {
   const ct = String(el.cubeBlockType.value || 'GRASS_BLOCK').toUpperCase();
@@ -3082,7 +3185,7 @@ el.cubeBlockType?.addEventListener('change', () => {
 
         const old = g.mesh;
         const cmats = ensureCubeMats();
-        const modelName = ensureCubeModelRegistered(activeCubeBlockType);
+        const modelName = ensureCubeModelRegistered(activeCubeBlockType, g.cubeTopRot ?? cubeTopPlacementRot);
         const newMesh = makeAsyncMinecraftModelMesh(modelName, cmats.base, { perFaceMaterials: true });
         newMesh.userData.__grassId = g.id;
 
@@ -3092,6 +3195,7 @@ el.cubeBlockType?.addEventListener('change', () => {
 
         // Best-effort dispose old geometry.
         old?.traverse?.(obj => { if (obj.isMesh && obj.geometry) obj.geometry.dispose?.(); });
+        disposeCubePerFaceMaterials(old);
 
         updateGrassMeshTransform(g);
         refreshGrassList();
@@ -3706,7 +3810,14 @@ function makeAsyncMinecraftModelMesh(modelName, material, opts = undefined){
     // If something is currently selected, re-apply selection materials now that real meshes exist.
     // (Otherwise the selected tint would only appear after the next interaction.)
     try {
-      if (typeof selectedId !== 'undefined' && selectedId != null) setSelected(selectedId);
+      // IMPORTANT: Placement previews are not part of the selection set and should never
+      // mutate placement defaults. Calling setSelected() here can inadvertently overwrite
+      // placement state (e.g., cube top-face UV rotation) while the user is in placement.
+      // We only need to re-apply the selection tint for *placed* instances.
+      const isPlacementPreview = !!(root?.userData?.__placementPreview || root?.userData?.__previewFoliageId);
+      if (!isPlacementPreview && typeof selectedId !== 'undefined' && selectedId != null) {
+        setSelected(selectedId);
+      }
     } catch (_) {
       // ignore
     }
@@ -3825,7 +3936,7 @@ function makeGrassMesh(mat){
 function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
   if (foliageId === 'CUBE') {
     const cmats = ensureCubeMats();
-    const modelName = ensureCubeModelRegistered(activeCubeBlockType);
+    const modelName = ensureCubeModelRegistered(activeCubeBlockType, cubeTopPlacementRot);
     return makeAsyncMinecraftModelMesh(modelName, cmats.placement, { perFaceMaterials: true });
   }
   const mats = ensureFoliageMats(foliageId);
@@ -4252,7 +4363,8 @@ function grassLabel(g){
 
   if (g.kind === 'CUBE') {
     const ct = String(g.cubeType || 'GRASS_BLOCK').toLowerCase().replace(/_/g, ' ');
-    extra += ` ${ct}`;
+    const r = clampRotSteps4(g.cubeTopRot ?? 0) * 90;
+    extra += ` ${ct}${r ? ` u${r}` : ''}`;
   }
 
 if (g.kind === 'SMALL_DRIPLEAF') {
@@ -4447,6 +4559,7 @@ function setSelected(id){
     syncVariantControls();
     syncPropaguleControls();
     syncCubeControls();
+    syncCubeTopRotationControls();
     syncSeagrassFrameControls();
     syncSmallDripleafRotationControls();
     syncBambooUvUI();
@@ -4458,6 +4571,7 @@ function setSelected(id){
     syncVariantControls();
     syncPropaguleControls();
     syncCubeControls();
+    syncCubeTopRotationControls();
     syncSeagrassFrameControls();
     syncSmallDripleafRotationControls();
     syncBambooUvUI();
@@ -4515,12 +4629,20 @@ function setSelected(id){
 	if (g.kind === 'CUBE') {
 		activeCubeBlockType = String(g.cubeType || activeCubeBlockType || 'GRASS_BLOCK').toUpperCase();
 		if (!CUBE_BLOCK_TYPE_BY_TOKEN.has(activeCubeBlockType)) activeCubeBlockType = 'GRASS_BLOCK';
+
+		// Also mirror the selected cube's top-face UV rotation into the placement defaults.
+		cubeTopPlacementRot = clampRotSteps4(g.cubeTopRot ?? cubeTopPlacementRot);
 		if (el.cubeControls) el.cubeControls.classList.remove('hidden');
 		if (el.cubeBlockType) el.cubeBlockType.value = activeCubeBlockType;
+		if (el.cubeTopRotationControls) el.cubeTopRotationControls.classList.remove('hidden');
+		if (el.cubeTopRotLabel) el.cubeTopRotLabel.textContent = `${cubeTopPlacementRot * 90}°`;
 	} else {
 		// Only show the cube selector when placing cubes (unless a cube is currently selected).
 		if (!foliageSupportsCubeBlockType(activeFoliageId) && el.cubeControls) {
 			el.cubeControls.classList.add('hidden');
+		}
+		if (!foliageSupportsCubeBlockType(activeFoliageId) && el.cubeTopRotationControls) {
+			el.cubeTopRotationControls.classList.add('hidden');
 		}
 	}
 
@@ -4604,7 +4726,7 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
     mesh = makeDripstoneStackMesh(mats.base, variant?.height ?? 1, variant?.dir ?? 'up');
   } else if (kind === 'CUBE') {
     const cmats = ensureCubeMats();
-    const modelName = ensureCubeModelRegistered(activeCubeBlockType);
+    const modelName = ensureCubeModelRegistered(activeCubeBlockType, cubeTopPlacementRot);
     mesh = makeAsyncMinecraftModelMesh(modelName, cmats.base, { perFaceMaterials: true });
   } else if (kind === 'MANGROVE_PROPAGULE') {
     const pmats = ensurePropaguleMats(activePropaguleModel);
@@ -4632,7 +4754,10 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
   const g = { id, kind, block: block.clone(), off: { ...fixedOff }, mesh, variant };
   if (kind === 'BAMBOO' && __bambooMat) g.__bambooMat = __bambooMat;
   if (kind === 'MANGROVE_PROPAGULE') g.propaguleModel = String(activePropaguleModel || 'ground');
-  if (kind === 'CUBE') g.cubeType = String(activeCubeBlockType || 'GRASS_BLOCK');
+  if (kind === 'CUBE') {
+    g.cubeType = String(activeCubeBlockType || 'GRASS_BLOCK');
+    g.cubeTopRot = clampRotSteps4(cubeTopPlacementRot);
+  }
   grasses.set(id, g);
   occupiedByBlock.set(bKey, id);
 
@@ -5903,7 +6028,7 @@ function ensurePlacementPreview(){
         ? `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}|${bambooModelSize}`
         : `${activeFoliageId}|${activeVariantHeight}|${activeVariantDir}`)
     : (activeFoliageId === 'CUBE'
-        ? `${activeFoliageId}|${String(activeCubeBlockType || 'GRASS_BLOCK').toUpperCase()}`
+        ? `${activeFoliageId}|${String(activeCubeBlockType || 'GRASS_BLOCK').toUpperCase()}|u${clampRotSteps4(cubeTopPlacementRot) * 90}`
         : (activeFoliageId === 'MANGROVE_PROPAGULE'
             ? `${activeFoliageId}|${activePropaguleModel}`
             : activeFoliageId));
@@ -5924,6 +6049,20 @@ function ensurePlacementPreview(){
   placementPreview.userData.__previewKey = previewKey;
   placementPreview.userData.__previewFoliageId = activeFoliageId;
   scene.add(placementPreview);
+
+  // IMPORTANT: When we rebuild the placement preview (e.g. rotating the cube top face with T,
+  // switching variants, changing block type, etc.) we must keep it anchored to the current
+  // placementBlock under the mouse. Otherwise it resets to (0,0,0) until the next mousemove.
+  if (placementMode && placementPreview) {
+    const off = offsetToVec3ForKind(activeFoliageId, placementOff.x, placementOff.y, placementOff.z);
+    placementPreview.position.set(
+      placementBlock.x + off.x,
+      placementBlock.y + off.y,
+      placementBlock.z + off.z
+    );
+    placementPreview.visible = true;
+  }
+
   updatePlacementPreviewBlockedState();
   try { requestRender(); } catch (_) {}
 }
@@ -6121,6 +6260,17 @@ window.addEventListener('keydown', (e) => {
       try { requestRender(); } catch (_) {}
       e.preventDefault();
     }
+    // Cube top-face texture rotation in placement preview: T rotates 90° clockwise.
+    if (key === 't' && activeFoliageId === 'CUBE') {
+      cubeTopPlacementRot = clampRotSteps4(cubeTopPlacementRot + 1);
+      // Rebuild preview so the UV rotation is applied.
+      try { ensurePlacementPreview(); } catch (_) {}
+      try { syncCubeTopRotationControls(); } catch (_) {}
+      try { requestRender(); } catch (_) {}
+      e.preventDefault();
+      return;
+    }
+
     // ESC cancels placement.
     if (e.key === 'Escape') {
       exitPlacementMode();
@@ -6141,6 +6291,16 @@ window.addEventListener('keydown', (e) => {
 
   let changed = false;
   const key = e.key.toLowerCase();
+
+  // Cube top-face texture rotation (visual-only): T rotates 90° clockwise.
+  if (key === 't' && g.kind === 'CUBE') {
+    g.cubeTopRot = clampRotSteps4((g.cubeTopRot ?? cubeTopPlacementRot) + 1);
+    cubeTopPlacementRot = g.cubeTopRot;
+    rebuildCubeInstance(g);
+    setSelected(g.id);
+    e.preventDefault();
+    return;
+  }
 
   // MC axes: +Z south. W should move north => offZ--.
   if (key === 'w' || e.key === 'ArrowUp') {
