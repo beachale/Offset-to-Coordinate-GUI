@@ -16,7 +16,7 @@ const f = Math.fround;
 // We load foliage textures directly from the Minecraft assets repo.
 // NOTE: Some assets (e.g. small dripleaf) are missing on older snapshot branches.
 // Use a newer snapshot branch as the default upstream for block textures.
-const MC_ASSETS_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/textures/block/';
+const MC_ASSETS_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-4/assets/minecraft/textures/block/';
 const PROGRAMMER_ART_BLOCK_TEX_BASE = 'https://raw.githubusercontent.com/Faithful-Pack/Default-Programmer-Art/refs/heads/1.21.10/assets/minecraft/textures/block/';
 
 // Explicit whitelist of textures we swap to Programmer Art.
@@ -182,7 +182,7 @@ function blockTextureUrl(key){
 }
 
 // Keep block model JSON in sync with the texture snapshot branch.
-const MC_ASSETS_BLOCK_MODEL_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-3/assets/minecraft/models/block/';
+const MC_ASSETS_BLOCK_MODEL_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/refs/heads/26.1-snapshot-4/assets/minecraft/models/block/';
 
 // Some vanilla foliage textures are grayscale and are normally tinted by the game.
 // This tool doesn't simulate biome tinting, so we apply a fixed color overlay for
@@ -2551,10 +2551,15 @@ const CUBE_BLOCK_TYPES = Object.freeze([
   { token: 'DIRT', label: 'dirt', textures: { all:'block/dirt', particle:'block/dirt' } },
   { token: 'STONE', label: 'stone block', textures: { all:'block/stone', particle:'block/stone' } },
   { token: 'PODZOL', label: 'podzol', textures: { up:'block/podzol_top', side:'block/podzol_side', down:'block/dirt', particle:'block/podzol_side' } },
+  // Nylium: top + side textures, with netherrack underside (matches vanilla).
+  { token: 'CRIMSON_NYLIUM', label: 'crimson nylium', textures: { up:'block/crimson_nylium', side:'block/crimson_nylium_side', down:'block/netherrack', particle:'block/crimson_nylium_side' } },
+  { token: 'WARPED_NYLIUM', label: 'warped nylium', textures: { up:'block/warped_nylium', side:'block/warped_nylium_side', down:'block/netherrack', particle:'block/warped_nylium_side' } },
   { token: 'DIRT_PATH', label: 'dirt path', textures: { up:'block/dirt_path_top', side:'block/dirt_path_side', down:'block/dirt', particle:'block/dirt_path_top' } },
   { token: 'COARSE_DIRT', label: 'coarse dirt', textures: { all:'block/coarse_dirt', particle:'block/coarse_dirt' } },
   { token: 'ROOTED_DIRT', label: 'rooted dirt', textures: { all:'block/rooted_dirt', particle:'block/rooted_dirt' } },
   { token: 'DRIPSTONE_BLOCK', label: 'dripstone block', textures: { all:'block/dripstone_block', particle:'block/dripstone_block' } },
+  { token: 'GRAVEL', label: 'gravel', textures: { all:'block/gravel', particle:'block/gravel' } },
+  { token: 'SAND', label: 'sand', textures: { all:'block/sand', particle:'block/sand' } },
 ]);
 
 const CUBE_BLOCK_TYPE_BY_TOKEN = new Map(CUBE_BLOCK_TYPES.map(t => [t.token, t]));
