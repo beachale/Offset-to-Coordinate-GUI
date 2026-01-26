@@ -1689,6 +1689,9 @@ function rebuildAllPlacedGrassMeshes(){
       } else if (kind === 'SUNFLOWER') {
         const mats = ensureFoliageMats(kind);
         mesh = makeSunflowerDoubleMesh(mats.baseBottom, mats.baseTop);
+      } else if (kind === 'PITCHER_PLANT') {
+        const mats = ensureFoliageMats(kind);
+        mesh = makePitcherPlantDoubleMesh(mats.baseBottom, mats.baseTop);
       } else if (kind === 'TALL_SEAGRASS') {
         const mats = ensureFoliageMats(kind);
         mesh = makeTallSeagrassDoubleMesh(mats.baseBottom, mats.baseTop);
@@ -3483,7 +3486,9 @@ function texNamesForFoliage(id){
     case 'LILAC': return { bottom: 'lilac_bottom', top: 'lilac_top' };
     case 'ROSE_BUSH': return { bottom: 'rose_bush_bottom', top: 'rose_bush_top' };
     case 'PEONY': return { bottom: 'peony_bottom', top: 'peony_top' };
-    case 'PITCHER_PLANT': return { bottom: 'pitcher_plant_bottom', top: 'pitcher_plant_top' };
+    // Pitcher plant (final growth stage) uses the pitcher crop stage 4 textures in vanilla.
+    // (The block model JSONs reference `block/pitcher_crop_*_stage_4`, not `pitcher_plant_*`.)
+    case 'PITCHER_PLANT': return { bottom: 'pitcher_crop_bottom_stage_4', top: 'pitcher_crop_top_stage_4' };
     case 'TALL_SEAGRASS': return { bottom: 'tall_seagrass_bottom', top: 'tall_seagrass_top' };
 
     // XZ (single)
@@ -4163,10 +4168,38 @@ function makePlacementPreviewMesh(foliageId = 'SHORT_GRASS'){
     return makeTallSeagrassDoubleMesh(mats.placementBottom, mats.placementTop);
   }
 
+  // Pitcher plant uses dedicated top/bottom block models (with a slight overlap between halves).
+  if (foliageId === 'PITCHER_PLANT') {
+    return makePitcherPlantDoubleMesh(mats.placementBottom, mats.placementTop);
+  }
+
   if (mats.model === 'double') {
     return makeTallGrassMesh(mats.placementBottom, mats.placementTop);
   }
   return makeGrassMesh(mats.placement);
+}
+
+function makePitcherPlantDoubleMesh(bottomMat, topMat){
+  const root = new THREE.Group();
+
+  const bottom = makeAsyncMinecraftModelMesh('pitcher_plant_bottom', bottomMat);
+  bottom.position.set(0, 0, 0);
+  bottom.userData.__tallPart = 'bottom';
+  bottom.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'bottom'; });
+
+  const top = makeAsyncMinecraftModelMesh('pitcher_plant_top', topMat);
+  top.position.set(0, 1, 0);
+  top.userData.__tallPart = 'top';
+  top.traverse(obj => { if (obj.isMesh) obj.userData.__tallPart = 'top'; });
+
+  root.add(bottom);
+  root.add(top);
+
+  root.traverse(obj => {
+    if (obj.isMesh) obj.userData.__isGrassPart = true;
+  });
+
+  return root;
 }
 
 function makeTallSeagrassDoubleMesh(bottomMat, topMat){
@@ -4930,6 +4963,10 @@ function addGrass(block, off = {x:7,y:7,z:7}, foliageId = activeFoliageId){
     mesh = makeSmallDripleafDoubleMesh(mats.base, mats.base);
   } else if (kind === 'TALL_SEAGRASS') {
     mesh = makeTallSeagrassDoubleMesh(mats.baseBottom, mats.baseTop);
+  } else if (kind === 'PITCHER_PLANT') {
+    // Pitcher plant uses dedicated top/bottom block models (not a generic crossed-stalk).
+    // Keep placed instances consistent with placement preview.
+    mesh = makePitcherPlantDoubleMesh(mats.baseBottom, mats.baseTop);
   } else {
     mesh = (model === 'double')
       ? makeTallGrassMesh(mats.baseBottom, mats.baseTop)
