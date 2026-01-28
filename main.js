@@ -5263,7 +5263,8 @@ el.loadGrassData.addEventListener('click', () => {
 el.crackCoords.addEventListener('click', async () => {
   const centerX = num(el.crackCenterX.value, 0);
   const centerZ = num(el.crackCenterZ.value, 0);
-  const radius = clamp(Math.round(num(el.crackRadius.value, 256)), 0, 50000);
+  // Radius cap (applies to both 1.8+ and pre-1.8 scan modes)
+  const radius = clamp(Math.round(num(el.crackRadius.value, 256)), 0, 100000);
   const yMin = Math.round(num(el.crackYMin.value, 62));
   const yMax = Math.round(num(el.crackYMax.value, 70));
   const version = el.crackVersion.value === 'postb1_5' ? 'postb1_5' : 'post1_12';
