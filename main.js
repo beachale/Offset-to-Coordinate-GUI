@@ -1675,7 +1675,33 @@ function rebuildAllPlacedGrassMeshes(){
       } else if (kind === 'BAMBOO') {
         const mats = ensureFoliageMats(kind);
         const h = Math.max(1, Math.min(16, Math.trunc(g.variant?.height ?? 1)));
-        mesh = makeBambooMesh(mats.base, h);
+        const ms = String(g.variant?.modelSize || bambooModelSize || '2x2');
+        const u = clampInt(g.variant?.uvU ?? bambooUvU, 0, 15);
+        const v = clampInt(g.variant?.uvV ?? bambooUvV, 0, 15);
+
+        // Preserve per-instance bamboo UV/model tweaks across pack/mipmap rebuilds.
+        let bmat = null;
+        try {
+          const src = mats.base;
+          bmat = src.clone();
+          if (src.map) {
+            bmat.map = src.map.clone();
+            applyBambooUvToTexture(bmat.map, u, v);
+          }
+          // Keep opacity in sync with the current slider setting.
+          try {
+            const op = intendedOpacityOf(src, grassOpacity);
+            if (Number.isFinite(op)) {
+              bmat.opacity = op;
+              bmat.transparent = (op < 1) || bmat.transparent;
+            }
+          } catch (_) {}
+        } catch (_) {
+          bmat = mats.base;
+        }
+        g.__bambooMat = (bmat && bmat.isMaterial) ? bmat : null;
+
+        mesh = makeBambooMesh(bmat || mats.base, h, { modelSize: ms });
       } else if (kind === 'POINTED_DRIPSTONE') {
         const mats = ensureFoliageMats(kind);
         const h = Math.max(1, Math.min(16, Math.trunc(g.variant?.height ?? 1)));
@@ -1689,6 +1715,10 @@ function rebuildAllPlacedGrassMeshes(){
       } else if (kind === 'SUNFLOWER') {
         const mats = ensureFoliageMats(kind);
         mesh = makeSunflowerDoubleMesh(mats.baseBottom, mats.baseTop);
+      } else if (kind === 'SMALL_DRIPLEAF') {
+        const mats = ensureFoliageMats(kind);
+        mesh = makeSmallDripleafDoubleMesh(mats.base, mats.base);
+        try { applySmallDripleafTopRotation(mesh, g.variant?.rot ?? 0); } catch (_) {}
       } else if (kind === 'PITCHER_PLANT') {
         const mats = ensureFoliageMats(kind);
         mesh = makePitcherPlantDoubleMesh(mats.baseBottom, mats.baseTop);
@@ -2191,7 +2221,7 @@ function setAnimatedStripTextureFrame(tex, frameIndex, frameCountOverride = null
       tex.offset.set(0, 0);
 
       // Rebuild mipmaps for the current frame.
-      const levels = useMips ? Math.max(0, Math.min(4, Math.trunc(Number(mcMipmapLevels) || 0))) : 0;
+      const levels = Math.max(0, Math.min(4, Math.trunc(Number(mcMipmapLevels) || 0)));
       if (levels > 0) {
         tex.minFilter = THREE.NearestMipmapLinearFilter;
         tex.magFilter = THREE.NearestFilter;
@@ -2430,7 +2460,10 @@ modelJsonCache.set('tall_seagrass_bottom', Promise.resolve(LOCAL_TALL_SEAGRASS_B
 modelJsonCache.set('tall_seagrass_top', Promise.resolve(LOCAL_TALL_SEAGRASS_TOP_MODEL));
 
 async function getBlockTexture(texName, opts){
-  const useMips = Boolean(opts && opts.useMips);
+  const useMips =
+    (opts && ('useMips' in opts))
+      ? Boolean(opts.useMips)
+      : (Math.max(0, Math.min(4, Math.trunc(Number(mcMipmapLevels) || 0))) > 0);
   const cache = useMips ? textureCacheMipped : textureCacheNoMips;
   const placeholder = useMips ? PLACEHOLDER_TEX_MIP : PLACEHOLDER_TEX_NO_MIP;
 
@@ -6454,6 +6487,61 @@ viewCanvas.addEventListener('mouseup', (e) => {
 });
 
 // --- Keyboard offsets: WASD/arrows X/Z, R/F Y ---
+// Camera-relative movement helper:
+// Map WASD/arrow movement to the nearest *cardinal* direction the camera is facing on the XZ plane.
+// This makes "A/Left" always mean "move left on screen" regardless of whether you're looking north/east/south/west.
+function cameraCardinalBasisXZ(){
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+
+  // Ignore pitch; we only care about yaw for X/Z movement.
+  dir.y = 0;
+
+  const ax = Math.abs(dir.x);
+  const az = Math.abs(dir.z);
+
+  // If we're looking almost straight up/down, fall back to north.
+  if (ax < 1e-6 && az < 1e-6) {
+    return { fAxis: 'z', fSign: -1, rAxis: 'x', rSign: 1 };
+  }
+
+  // Minecraft axes: +Z = south, -Z = north.
+  // Pick the dominant axis so we snap to a stable cardinal direction.
+  if (ax >= az) {
+    // Facing east (+X) or west (-X)
+    const fSign = (dir.x >= 0) ? 1 : -1;
+    // Right of east is south; right of west is north.
+    return { fAxis: 'x', fSign, rAxis: 'z', rSign: fSign };
+  }
+
+  // Facing south (+Z) or north (-Z)
+  const fSign = (dir.z >= 0) ? 1 : -1;
+  // Right of south is west; right of north is east.
+  return { fAxis: 'z', fSign, rAxis: 'x', rSign: (fSign > 0 ? -1 : 1) };
+}
+
+function applyXZOffsetDelta(g, axis, delta){
+  if (!g || !axis || !delta) return false;
+  if (axis === 'x') {
+    if (isPointedDripstone(g.kind)) {
+      const ex = dripstoneRawToEff(g.off.x);
+      g.off.x = dripstoneEffToRaw(wrap(ex + delta, 0, 9));
+    } else {
+      g.off.x = wrap(g.off.x + delta, 0, 15);
+    }
+    return true;
+  }
+  if (axis === 'z') {
+    if (isPointedDripstone(g.kind)) {
+      const ez = dripstoneRawToEff(g.off.z);
+      g.off.z = dripstoneEffToRaw(wrap(ez + delta, 0, 9));
+    } else {
+      g.off.z = wrap(g.off.z + delta, 0, 15);
+    }
+    return true;
+  }
+  return false;
+}
 window.addEventListener('keydown', (e) => {
   // Grass texture quick toggle (ignore when typing in inputs)
   const tag0 = document.activeElement?.tagName?.toLowerCase();
@@ -6535,42 +6623,29 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  // MC axes: +Z south. W should move north => offZ--.
+  // Camera-relative X/Z movement (snapped to the nearest cardinal direction).
+  // Forward/back uses camera facing; left/right uses camera right vector.
+  // This keeps "A/Left" meaning "move left on screen".
+  const basis = cameraCardinalBasisXZ();
+  let moveAxis = null;
+  let moveDelta = 0;
+
   if (key === 'w' || e.key === 'ArrowUp') {
-    if (isPointedDripstone(g.kind)) {
-      const ez = dripstoneRawToEff(g.off.z);
-      g.off.z = dripstoneEffToRaw(wrap(ez - 1, 0, 9));
-    } else {
-      g.off.z = wrap(g.off.z - 1, 0, 15);
-    }
-    changed = true;
+    moveAxis = basis.fAxis;
+    moveDelta = basis.fSign;
+  } else if (key === 's' || e.key === 'ArrowDown') {
+    moveAxis = basis.fAxis;
+    moveDelta = -basis.fSign;
+  } else if (key === 'a' || e.key === 'ArrowLeft') {
+    moveAxis = basis.rAxis;
+    moveDelta = -basis.rSign;
+  } else if (key === 'd' || e.key === 'ArrowRight') {
+    moveAxis = basis.rAxis;
+    moveDelta = basis.rSign;
   }
-  if (key === 's' || e.key === 'ArrowDown') {
-    if (isPointedDripstone(g.kind)) {
-      const ez = dripstoneRawToEff(g.off.z);
-      g.off.z = dripstoneEffToRaw(wrap(ez + 1, 0, 9));
-    } else {
-      g.off.z = wrap(g.off.z + 1, 0, 15);
-    }
-    changed = true;
-  }
-  if (key === 'a' || e.key === 'ArrowLeft') {
-    if (isPointedDripstone(g.kind)) {
-      const ex = dripstoneRawToEff(g.off.x);
-      g.off.x = dripstoneEffToRaw(wrap(ex - 1, 0, 9));
-    } else {
-      g.off.x = wrap(g.off.x - 1, 0, 15);
-    }
-    changed = true;
-  }
-  if (key === 'd' || e.key === 'ArrowRight') {
-    if (isPointedDripstone(g.kind)) {
-      const ex = dripstoneRawToEff(g.off.x);
-      g.off.x = dripstoneEffToRaw(wrap(ex + 1, 0, 9));
-    } else {
-      g.off.x = wrap(g.off.x + 1, 0, 15);
-    }
-    changed = true;
+
+  if (moveAxis) {
+    changed = applyXZOffsetDelta(g, moveAxis, moveDelta) || changed;
   }
 
   if (!isYOffsetLocked(g.kind)) {
