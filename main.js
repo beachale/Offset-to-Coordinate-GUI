@@ -5300,7 +5300,12 @@ el.crackCoords.addEventListener('click', async () => {
   const radius = clamp(Math.round(num(el.crackRadius.value, 256)), 0, 100000);
   const yMin = Math.round(num(el.crackYMin.value, 62));
   const yMax = Math.round(num(el.crackYMax.value, 70));
-  const version = el.crackVersion.value === 'postb1_5' ? 'postb1_5' : 'post1_12';
+  // Versions:
+  //   post1_12  -> "1.8+" mode (cracker ignores Y)
+  //   postb1_5  -> "pre 1.8" mode (vanilla XOR seed)
+  //   b1_6_tb3  -> b1.6-tb3 (ADD seed)
+  const vraw = String(el.crackVersion?.value || 'post1_12');
+  const version = (vraw === 'post1_12' || vraw === 'postb1_5' || vraw === 'b1_6_tb3') ? vraw : 'post1_12';
   const matchMode = (el.matchMode?.value === 'scored') ? 'scored' : 'strict';
   const tolerance = clamp(Math.round(num(el.tolerance?.value, 1)), 0, 2);
 
@@ -5517,7 +5522,8 @@ function __computeCrackShift(match){
   const includeY = Boolean(el.crackTpIncludeY?.checked);
   const dx = (match.x|0) - (ref.x|0);
   const dz = (match.z|0) - (ref.z|0);
-  const version = (__lastCrackVersion === 'postb1_5') ? 'postb1_5' : 'post1_12';
+  const vraw = String(__lastCrackVersion || 'post1_12');
+  const version = (vraw === 'post1_12' || vraw === 'postb1_5' || vraw === 'b1_6_tb3') ? vraw : 'post1_12';
   const yIsFree = (version === 'post1_12');
 
   // In 1.8+ mode, the hash ignores Y entirely, so the "match Y" is just Y min.
@@ -5801,22 +5807,38 @@ const GF = (() => {
   // instead of BigInt-heavy 64-bit math.
   const X_MULT = 0x2fc20f | 0;    // 3129871
   const Z_MULT = 0x6ebfff5 | 0;   // 116129781
+  // b1.6-tb3 special-case (RenderBlocks seed uses + z*6129781 instead of ^ z*116129781L)
+  const Z_MULT_TB3 = 0x5d270d | 0; // 6129781
   const LCG_MULT = 0x285b825 | 0; // 42317861
   const LCG_ADDEND = 11 | 0;
 
   function packedGrassOffset(x, y, z, version){
+    // This cracker only needs bits 16..27 of the 64-bit long.
+    // Those bits live in the low 32 bits, and the low 32 bits depend only on the low 32 bits
+    // of intermediate results. So we can compute the packed offset using fast 32-bit Math.imul.
     const yy = (version === 'post1_12') ? 0 : (y | 0);
 
-    // Java (BlockState.getOffset / AbstractBlock.getOffset):
-    //   long l = (x*3129871L) ^ (z*116129781L) ^ y;
-    //   l = l*l*42317861L + l*11L;
-    let l = (BigInt(x | 0) * BigInt(X_MULT)) ^ (BigInt(z | 0) * BigInt(Z_MULT)) ^ BigInt(yy);
-    l = BigInt.asIntN(64, l);
-    l = BigInt.asIntN(64, (l * l * BigInt(LCG_MULT)) + (l * BigInt(LCG_ADDEND)));
-    const u = BigInt.asUintN(64, l);
+    // Vanilla (b1.7.3 / 1.8+):
+    //   long l = (long)(x*3129871) ^ ((long)z*116129781L) ^ (long)y;
+    // b1.6-tb3:
+    //   long l = (long)(x*3129871 + z*6129781 + y);
+    const xi = x | 0;
+    const zi = z | 0;
+    const xTerm = Math.imul(xi, X_MULT) | 0;
+    let l = 0;
+    if (version === 'b1_6_tb3') {
+      const zTerm = Math.imul(zi, Z_MULT_TB3) | 0;
+      l = (xTerm + zTerm + (yy|0)) | 0;
+    } else {
+      const zTerm = Math.imul(zi, Z_MULT) | 0;
+      l = (xTerm ^ zTerm ^ (yy|0)) | 0;
+    }
 
-    // Bits 16..27 contain three 4-bit nibbles (ox | oy<<4 | oz<<8).
-    return Number((u >> 16n) & 0xFFFn) >>> 0;
+    // l = l*l*42317861L + l*11L (low 32 bits only)
+    const ll = Math.imul(l, l) | 0;
+    l = (Math.imul(ll, LCG_MULT) + Math.imul(l, LCG_ADDEND)) | 0;
+
+    return (l >>> 16) & 0xFFF;
   }
 
   // --- Pointed dripstone equivalence handling ---
@@ -5965,7 +5987,7 @@ const GF = (() => {
 
     // Old versions (b1.5-1.12) do far more work because Y affects offsets.
     // Cap worker count to 4 to keep overhead low and match the newer-cracker style.
-    const targetWorkers = (version === 'postb1_5') ? 4 : hw;
+    const targetWorkers = (version !== 'post1_12') ? 4 : hw;
     const nWorkers = wantWorkers ? Math.max(1, Math.min(targetWorkers, hw, xCount)) : 1;
 
     if (wantWorkers && nWorkers > 1) {
